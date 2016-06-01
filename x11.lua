@@ -2,7 +2,7 @@ local ffi = require 'ffi'
 local pl = require 'pl.import_into' ()
 local uv = require 'luv'
 
-local x = {}
+local x11 = {}
 
 -- Load xcb
 local xcb, xcb_randr, xcb_xinerama
@@ -17,10 +17,10 @@ do
 	xcb_xinerama = ffi.load 'xcb-xinerama'
 	xcb_util = ffi.load 'xcb-util'
 
-	x.xcb = xcb
-	x.xcb_randr = xcb_randr
-	x.xcb_xinerama = xcb_xinerama
-	x.xcb_util = xcb_util
+	x11.xcb = xcb
+	x11.xcb_randr = xcb_randr
+	x11.xcb_xinerama = xcb_xinerama
+	x11.xcb_util = xcb_util
 end
 
 -- Connect
@@ -32,9 +32,9 @@ do
 	screen = xcb_util.xcb_aux_get_screen(conn, scrid[0])
 end
 -- TODO
-x.conn = conn
-x.setup = setup
-x.screen = screen
+x11.conn = conn
+x11.setup = setup
+x11.screen = screen
 
 -- Load atoms
 local A
@@ -49,9 +49,9 @@ do
 		A[name] = xcb.xcb_intern_atom_reply(conn, req, nil).atom
 	end
 end
-x.A = A
+x11.A = A
 
-function x.randr_outputs()
+function x11.randr_outputs()
 	local res = xcb_randr.xcb_randr_get_screen_resources_current_reply(conn, xcb_randr.xcb_randr_get_screen_resources_current(conn, screen.root), nil)
 
 	local ptr = xcb_randr.xcb_randr_get_screen_resources_current_outputs(res)
@@ -96,7 +96,7 @@ function x.randr_outputs()
 		:copy()
 end
 
-function x.xinerama_screens()
+function x11.xinerama_screens()
 	local err = ffi.new('xcb_generic_error_t*[1]', nil)
 	local reply = xcb_xinerama.xcb_xinerama_query_screens_reply(conn, xcb_xinerama.xcb_xinerama_query_screens(conn), err)
 	if err[0] ~= nil then
@@ -120,8 +120,20 @@ function x.xinerama_screens()
 	return res
 end
 
+function x11.map(win)
+	xcb.xcb_map_window(conn, win)
+end
+
+function x11.unmap(win)
+	xcb.xcb_unmap_window(conn, win)
+end
+
+function x11.flush()
+	xcb.xcb_flush(conn)
+end
+
 local handlers = {}
-x.handlers = handlers
+x11.handlers = handlers
 
 local xcb_poll = uv.new_poll(xcb.xcb_get_file_descriptor(conn))
 uv.poll_start(xcb_poll, 'r', function(err, events)
@@ -130,7 +142,7 @@ uv.poll_start(xcb_poll, 'r', function(err, events)
 	end
 
 	while true do
-		local ev = xcb.xcb_wait_for_event(conn)
+		local ev = xcb.xcb_poll_for_event(conn)
 		if ev == nil then break end
 
 		local typ = ffi.string(xcb_util.xcb_event_get_label(bit.band(ev.response_type, bit.bnot(0x80))))
@@ -148,4 +160,4 @@ uv.poll_start(xcb_poll, 'r', function(err, events)
 	end
 end)
 
-return x
+return x11

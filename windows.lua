@@ -1,4 +1,4 @@
--- local x11 = require 'x11'
+local x11 = require 'x11'
 local pl = require 'pl.import_into' ()
 
 local function gen_id()
@@ -6,69 +6,170 @@ local function gen_id()
 end
 
 local windows = {
-	cache = {};
+	cache = setmetatable({}, { __mode = 'v' });
 }
 
 local function Window(win)
+	local required = {
+		'add';
+		'move';
+		'replace';
+		'put_under';
+		'removed_from';
+		'on';
+		'off';
+	}
+	local missing
+	for _, name in ipairs(required) do
+		if type(win[name]) ~= 'function' then
+			print('missing', name)
+			missing = true
+		end
+	end
+	if missing then
+		error('missing')
+	end
+
+	win.parents = {}
+
+	do
+		local old_put_under = win.put_under
+		function win.put_under(parent)
+			win.parents[parent] = true
+			old_put_under(parent)
+		end
+	end
+
+	do
+		local old_removed_from = win.removed_from
+		function win.removed_from(parent)
+			win.parents[parent] = nil
+			old_removed_from(parent)
+		end
+	end
+
+	do
+		local oldmove = win.move
+		function win.move(parent, x, y, width, height)
+			print('move', win.xwin, parent.xwin, x, y, width, height)
+
+			if win.parent ~= parent then
+				x11.reparent(win.xwin, parent.xwin)
+			end
+			win.parent = parent
+			x11.move(win.xwin, x, y, width, height)
+
+			oldmove(parent, x, y, width, height)
+		end
+	end
+
 	return win
 end
 
 setmetatable(windows, { __call = function(_, xwin, get)
 	if windows.cache[xwin] then
 		return windows.cache[xwin]
-	elseif get then
-		return get(xwin)
 	else
-		local win = {
-			xwin = xwin;
-			needs_title = true;
-		}
-
-		function win.move(parent, x, y, width, height)
-			print('move', win.xwin, parent.xwin, x, y, width, height)
-		end
-
-		function win.add(child, dir)
-			win.parent.add(child, 'up')
-		end
-
-		return win
+		return get(xwin)
 	end
 end })
 
-function windows.frame(win)
-	local frame = {
-		xwin = 'f ' .. win.xwin;
-		needs_title = win.needs_title;
+function windows.auto(xwin)
+	local attrs = x11.get_window_attributes(xwin)()
+
+	if attrs.override_redirect then
+		return windows.oclw(xwin)
+	else
+		return windows.clw(xwin)
+	end
+end
+
+function windows.dummy(xwin)
+	local win = {
+		type = 'dummy';
+		xwin = xwin;
 	}
 
-	win.parent = frame
+	return win
+end
 
-	function frame.move(parent, x, y, width, height)
-		print('move', frame.xwin, parent.xwin, x, y, width, height)
-		win.move(frame, x + 2, y, width - 4, height - 2)
+function windows.oclw(xwin)
+	local win = {
+		type = 'oclw';
+		xwin = xwin;
+	}
+
+	return win
+end
+
+function windows.clw(xwin)
+	local win = {
+		type = 'clw';
+		clw = clw;
+		needs_title = true;
+	}
+
+	win.xwin = x11.xcb.xcb_generate_id(x11.conn)
+	x11.xcb.xcb_create_window(x11.conn,
+		0, -- depth = copy from parent
+		win.xwin, -- window
+		x11.screen.root, -- parent
+		0, 0, -- x, y
+		1, 1, -- width, height
+		0, -- border width
+		x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
+		x11.screen.root_visual, -- visual
+		0, -- values mask
+		nil -- values
+	)
+
+	function win.put_under(parent)
 	end
 
-	function frame.add(child, dir)
-		if dir == 'up' then
-			frame.parent.add(child, 'up')
-		elseif dir == 'down' then
-			win.add(child, 'down')
-		end
+	function win.removed_from(parent)
 	end
 
-	function frame.replace(prev, new)
+	function win.move(parent, x, y, width, height)
+		x11.move(win.clw, 2, 0, width - 4, height - 2)
 	end
 
-	return frame
+	function win.add(child, dir)
+		win.parent.add(child, 'up')
+	end
+
+	function win.on(parent, x, y, width, height)
+	end
+
+	function win.off()
+	end
+
+	function win.replace(prev, new)
+	end
+
+	Window(win)
+
+	return win
 end
 
 function windows.hsplit()
 	local con = {
-		xwin = 'h ' .. gen_id();
 		children = {};
 		sizes = {};
 	}
+
+	con.xwin = x11.xcb.xcb_generate_id(x11.conn)
+	x11.xcb.xcb_create_condow(x11.conn,
+		0, -- depth = copy from parent
+		con.xwin, -- condow
+		x11.screen.root, -- parent
+		0, 0, -- x, y
+		1, 1, -- width, height
+		0, -- border width
+		x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
+		x11.screen.root_visual, -- visual
+		0, -- values mask
+		nil -- values
+	)
 
 	local function resizer()
 		local r = {
@@ -76,22 +177,28 @@ function windows.hsplit()
 			x = 0;
 		}
 
-		setmetatable(r, { __call = function(_, child)
-			local width = con.width * con.sizes[child]
-			if r.ceil and width % 1 ~= 0 then
-				width = math.ceil(width)
-				r.ceil = false
-			else
-				width = math.floor(width)
-			end
-			child.move(con, r.x, con.y, width, con.height)
-			r.x = r.x + width
-		end })
+		if con.is_on then
+			setmetatable(r, { __call = function(_, child)
+				local width = con.width * con.sizes[child]
+				if r.ceil and width % 1 ~= 0 then
+					width = math.ceil(width)
+					r.ceil = false
+				else
+					width = math.floor(width)
+				end
+				child.move(con, r.x, con.y, width, con.height)
+				r.x = r.x + width
+			end })
+		else
+			setmetatable(r, { __call = function() end })
+		end
 
 		return r
 	end
 
 	function con.add(child)
+		child.put_under(con)
+
 		local num = #con.children
 		local factor = num / (num + 1)
 		local r = resizer()
@@ -101,7 +208,6 @@ function windows.hsplit()
 		end
 		con.children[#con.children + 1] = child
 		con.sizes[child] = 1/(num + 1)
-		child.parent = con
 		r(child)
 	end
 
@@ -122,7 +228,9 @@ function windows.hsplit()
 			table.remove(con.children, child_i)
 		end
 		con.sizes[child] = nil
-		print('unmap', child)
+		
+		child.removed_from(con)
+		child.off()
 	end
 
 	function con.resize(child, size)
@@ -152,12 +260,6 @@ function windows.hsplit()
 	end
 
 	function con.move(parent, x, y, width, height)
-		print('move', con.xwin, parent.xwin, x, y, width, height)
-		con.x = x
-		con.y = y
-		con.width = width
-		con.height = height
-
 		local r = resizer()
 		for _, child in ipairs(con.children) do
 			r(child)
@@ -172,12 +274,12 @@ function windows.hsplit()
 				con.sizes[child] = nil
 				con.sizes[new] = size
 
-				print('unmap', child.xwin)
+				child.off()
+
 				child = new
 				con.children[i] = new
 			end
 			r(child)
-			child.replace(prev, new)
 		end
 	end
 
@@ -200,8 +302,8 @@ function root.add(win, dir)
 			return root.child.add(win, 'down')
 		else
 			root.child = win
-			win.parent = root
-			win.move(root, root.x, root.y, root.width, root.height)
+			win.put_under(root)
+			win.on(root, root.x, root.y, root.width, root.height)
 		end
 	end
 end
@@ -209,11 +311,8 @@ end
 function root.replace(prev, new)
 	if root.child == prev then
 		root.child = new
-		print('unmap', prev.xwin)
-		new.move(root, root.x, root.y, root.width, root.height)
-	end
-	if root.child then
-		root.child.replace(prev, new)
+		prev.off()
+		new.on(root, root.x, root.y, root.width, root.height)
 	end
 end
 
@@ -240,31 +339,5 @@ function windows.replace(prev, new)
 		-- print('focus', focused.xwin)
 	end
 end
-
--- print('\nadding test1')
--- local test1 = windows.frame(windows('t1'))
--- windows.add(test1)
---
--- print('\nspliting')
--- local hsplit = windows.hsplit()
--- windows.replace(test1, hsplit)
--- windows.add(test1)
---
--- print('\nadding test2')
--- local test2 = windows.frame(windows('t2'))
--- windows.add(test2)
---
--- print('\nadding test3')
--- local test3 = windows.frame(windows('t3'))
--- windows.add(test3)
---
--- print('\nresizing')
--- hsplit.resize(test1, 0.5)
---
--- print('\nremoving test3')
--- hsplit.remove(test3)
---
--- print('\nreplacing test2 with test3')
--- windows.replace(test2, test3)
 
 return windows
