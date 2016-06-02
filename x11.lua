@@ -133,7 +133,7 @@ function x11.unmap(win)
 end
 
 function x11.reparent(win, parent, x, y)
-	print('reparent', win, parent)
+	print('repar', win, parent)
 	xcb.xcb_reparent_window(conn, win, parent, x or 0, y or 0)
 end
 
@@ -150,6 +150,41 @@ function x11.move(win, x, y, width, height)
 		xcb.XCB_CONFIG_WINDOW_WIDTH,
 		xcb.XCB_CONFIG_WINDOW_HEIGHT
 	), values)
+end
+
+do
+	local cw = {
+		{'back_pixmap', xcb.XCB_CW_BACK_PIXMAP};
+		{'back_pixel', xcb.XCB_CW_BACK_PIXEL};
+		{'border_pixmap', xcb.XCB_CW_BORDER_PIXMAP};
+		{'border_pixel', xcb.XCB_CW_BORDER_PIXEL};
+		{'bit_gravity', xcb.XCB_CW_BIT_GRAVITY};
+		{'win_gravity', xcb.XCB_CW_WIN_GRAVITY};
+		{'backing_stores', xcb.XCB_CW_BACKING_STORE};
+		{'backing_planes', xcb.XCB_CW_BACKING_PLANES};
+		{'backing_pixel', xcb.XCB_CW_BACKING_PIXEL};
+		{'override_redirect', xcb.XCB_CW_OVERRIDE_REDIRECT};
+		{'save_under', xcb.XCB_CW_SAVE_UNDER};
+		{'event_mask', xcb.XCB_CW_EVENT_MASK};
+		{'dont_propogate', xcb.XCB_CW_DONT_PROPAGATE};
+		{'colormap', xcb.XCB_CW_COLORMAP};
+		{'cursor', xcb.XCB_CW_CURSOR};
+	}
+	function x11.change_window_attributes(win, attrs)
+		local mask = 0
+		local values = ffi.new('int32_t[15]')
+		local i = 0
+
+		for _, attr in ipairs(cw) do
+			if attrs[attr[1]] then
+				mask = bit.bor(mask, attr[2])
+				values[i] = attrs[attr[1]]
+				i = i + 1
+			end
+		end
+
+		xcb.xcb_change_window_attributes(conn, win, mask, values)
+	end
 end
 
 function x11.flush()
@@ -170,6 +205,10 @@ function x11.get_geometry(win)
 		local reply = xcb.xcb_get_geometry_reply(conn, cookie, nil)
 		return reply
 	end
+end
+
+function x11.destroy_window(win)
+	xcb.xcb_destroy_window(conn, win)
 end
 
 local handlers = {}

@@ -29,6 +29,7 @@ x11.xcb.xcb_create_window(x11.conn,
 )
 
 x11.map(win)
+x11.map(win)
 
 local gc = x11.xcb.xcb_generate_id(x11.conn)
 local values = ffi.new('int[1]', x11.screen.white_pixel)
@@ -39,7 +40,7 @@ x11.flush()
 while true do
 	local ev = x11.xcb.xcb_wait_for_event(x11.conn)
 
-	local typ = ffi.string(xcb_util.xcb_event_get_label(bit.band(ev.response_type, bit.bnot(0x80))))
+	local typ = ffi.string(x11.xcb_util.xcb_event_get_label(bit.band(ev.response_type, bit.bnot(0x80))))
 
 	print('event', typ)
 
