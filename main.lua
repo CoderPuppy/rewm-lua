@@ -30,6 +30,9 @@ do
 	for i = 1, children_len do
 		local xwin = children[i - 1]
 		local clw = clws(xwin, clws.auto)
+		if clw.type == 'tiled' then
+			windows.add(clw.win)
+		end
 	end
 	x11.flush()
 end
@@ -48,8 +51,22 @@ x11.handlers.MapRequest = {'xcb_map_request_event_t', function(ev)
 end}
 
 x11.handlers.DestroyNotify = {'xcb_destroy_notify_event_t', function(ev)
+	print('destroy notify', ev.window, ev.event)
 	local clw = clws(ev.window, clws.dummy)
 	clw.destroyed(ev)
-end};
+end}
+
+x11.handlers.Expose = {'xcb_expose_event_t', function(ev)
+	print('expose', ev.window)
+	local clw = clws(ev.window, clws.auto)
+	print(clw.type)
+	clw.expose(ev)
+end}
+
+x11.handlers.PropertyNotify = {'xcb_property_notify_event_t', function(ev)
+	print('property change', ev.window)
+	local clw = clws(ev.window, clws.auto)
+	clw.property_change(ev)
+end}
 
 uv.run()

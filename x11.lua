@@ -154,21 +154,21 @@ end
 
 do
 	local cw = {
-		{'back_pixmap', xcb.XCB_CW_BACK_PIXMAP};
-		{'back_pixel', xcb.XCB_CW_BACK_PIXEL};
-		{'border_pixmap', xcb.XCB_CW_BORDER_PIXMAP};
-		{'border_pixel', xcb.XCB_CW_BORDER_PIXEL};
-		{'bit_gravity', xcb.XCB_CW_BIT_GRAVITY};
-		{'win_gravity', xcb.XCB_CW_WIN_GRAVITY};
-		{'backing_stores', xcb.XCB_CW_BACKING_STORE};
-		{'backing_planes', xcb.XCB_CW_BACKING_PLANES};
-		{'backing_pixel', xcb.XCB_CW_BACKING_PIXEL};
-		{'override_redirect', xcb.XCB_CW_OVERRIDE_REDIRECT};
-		{'save_under', xcb.XCB_CW_SAVE_UNDER};
-		{'event_mask', xcb.XCB_CW_EVENT_MASK};
-		{'dont_propogate', xcb.XCB_CW_DONT_PROPAGATE};
-		{'colormap', xcb.XCB_CW_COLORMAP};
-		{'cursor', xcb.XCB_CW_CURSOR};
+		{'back_pixmap', xcb.XCB_CW_BACK_PIXMAP, 'xcb_pixmap_t'};
+		{'back_pixel', xcb.XCB_CW_BACK_PIXEL, 'uint32_t'};
+		{'border_pixmap', xcb.XCB_CW_BORDER_PIXMAP, 'xcb_pixmap_t'};
+		{'border_pixel', xcb.XCB_CW_BORDER_PIXEL, 'uint32_t'};
+		{'bit_gravity', xcb.XCB_CW_BIT_GRAVITY, 'uint32_t'};
+		{'win_gravity', xcb.XCB_CW_WIN_GRAVITY, 'uint32_t'};
+		{'backing_stores', xcb.XCB_CW_BACKING_STORE, 'uint32_t'};
+		{'backing_planes', xcb.XCB_CW_BACKING_PLANES, 'uint32_t'};
+		{'backing_pixel', xcb.XCB_CW_BACKING_PIXEL, 'uint32_t'};
+		{'override_redirect', xcb.XCB_CW_OVERRIDE_REDIRECT, 'uint32_t'};
+		{'save_under', xcb.XCB_CW_SAVE_UNDER, 'uint32_t'};
+		{'event_mask', xcb.XCB_CW_EVENT_MASK, 'uint32_t'};
+		{'dont_propogate', xcb.XCB_CW_DONT_PROPAGATE, 'uint32_t'};
+		{'colormap', xcb.XCB_CW_COLORMAP, 'xcb_colormap_t'};
+		{'cursor', xcb.XCB_CW_CURSOR, 'xcb_cursor_t'};
 	}
 	function x11.change_window_attributes(win, attrs)
 		local mask = 0
@@ -178,12 +178,56 @@ do
 		for _, attr in ipairs(cw) do
 			if attrs[attr[1]] then
 				mask = bit.bor(mask, attr[2])
-				values[i] = attrs[attr[1]]
+				values[i] = ffi.cast(attr[3], attrs[attr[1]])
 				i = i + 1
 			end
 		end
 
 		xcb.xcb_change_window_attributes(conn, win, mask, values)
+	end
+end
+
+do
+	local gc_attrs = {
+		{'function', xcb.XCB_GC_FUNCTION, 'uint32_t'};
+		{'plane_mask', xcb.XCB_GC_PLANE_MASK, 'uint32_t'};
+		{'foreground', xcb.XCB_GC_FOREGROUND, 'uint32_t'};
+		{'background', xcb.XCB_GC_BACKGROUND, 'uint32_t'};
+		{'line_width', xcb.XCB_GC_LINE_WIDTH, 'uint32_t'};
+		{'line_style', xcb.XCB_GC_LINE_STYLE, 'uint32_t'};
+		{'cap_style', xcb.XCB_GC_CAP_STYLE, 'uint32_t'};
+		{'join_style', xcb.XCB_GC_JOIN_STYLE, 'uint32_t'};
+		{'fill_style', xcb.XCB_GC_FILL_STYLE, 'uint32_t'};
+		{'fill_rule', xcb.XCB_GC_FILL_RULE, 'uint32_t'};
+		{'tile', xcb.XCB_GC_TILE, 'xcb_pixmap_t'};
+		{'stipple', xcb.XCB_GC_STIPPLE, 'xcb_pixmap_t'};
+		{'tile_stipple_origin_x', xcb.XCB_GC_TILE_STIPPLE_ORIGIN_X, 'int32_t'};
+		{'tile_stipple_origin_y', xcb.XCB_GC_TILE_STIPPLE_ORIGIN_Y, 'int32_t'};
+		{'font', xcb.XCB_GC_FONT, 'xcb_font_t'};
+		{'subwindow_mode', xcb.XCB_GC_SUBWINDOW_MODE, 'uint32_t'};
+		{'graphics_exposures', xcb.XCB_GC_GRAPHICS_EXPOSURES, 'int32_t'};
+		{'clip_origin_x', xcb.XCB_GC_CLIP_ORIGIN_X, 'int32_t'};
+		{'clip_origin_y', xcb.XCB_GC_CLIP_ORIGIN_Y, 'int32_t'};
+		{'clip_mask', xcb.XCB_GC_CLIP_MASK, 'xcb_pixmap_t'};
+		{'dash_offset', xcb.XCB_GC_DASH_OFFSET, 'uint32_t'};
+		{'dash_list', xcb.XCB_GC_DASH_LIST, 'uint32_t'};
+		{'arc_mode', xcb.XCB_GC_ARC_MODE, 'uint32_t'};
+	}
+	function x11.change_gc(gc, attrs)
+		local mask = 0
+		local values = ffi.new('int32_t[23]')
+		local i = 0
+
+		for _, attr in ipairs(gc_attrs) do
+			if attrs[attr[1]] then
+				print('adding', attr[1])
+				mask = bit.bor(mask, attr[2])
+				values[i] = ffi.cast(attr[3], attrs[attr[1]])
+				i = i + 1
+			end
+		end
+
+		xcb.xcb_change_gc(conn, gc, mask, values)
 	end
 end
 
@@ -208,7 +252,19 @@ function x11.get_geometry(win)
 end
 
 function x11.destroy_window(win)
+	print('destroy', win)
 	xcb.xcb_destroy_window(conn, win)
+end
+
+function x11.get_property(win, prop, length)
+	local cookie = xcb.xcb_get_property(conn, 0, win, prop, xcb.XCB_GET_PROPERTY_TYPE_ANY, 0, length)
+	return function()
+		local reply = xcb.xcb_get_property_reply(conn, cookie, nil)
+		return {
+			ptr = xcb.xcb_get_property_value(reply);
+			len = xcb.xcb_get_property_value_length(reply);
+		}
+	end
 end
 
 local handlers = {}
@@ -225,6 +281,8 @@ end)
 -- this runs every time before waiting
 local xcb_prepare = uv.new_prepare()
 uv.prepare_start(xcb_prepare, function()
+	print('poll')
+
 	x11.flush()
 	
 	while true do
@@ -240,7 +298,7 @@ uv.prepare_start(xcb_prepare, function()
 				print('  handled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
 			end
 			if not handler then
-				io.stderr:write('unhandled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')\n')
+				print('unhandled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')\n')
 				break
 			end
 			handler[2](ffi.cast(handler[1] .. '*', ev))

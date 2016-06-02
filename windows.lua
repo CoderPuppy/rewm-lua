@@ -4,6 +4,21 @@ local uv = require 'luv'
 
 local x11 = require 'x11'
 
+local gc
+do
+	gc = x11.xcb.xcb_generate_id(x11.conn)
+	x11.xcb.xcb_create_gc(x11.conn, gc, x11.screen.root, 0, nil)
+end
+
+local font
+do
+	font = x11.xcb.xcb_generate_id(x11.conn)
+	-- local name = '-adobe-source code pro-medium-r-normal--12-113-75-75-m-0-iso10646-1'
+	-- local name = '-*-*-*-*-*-*-16-*-*-*-*-*-iso10646-1'
+	local name = 'fixed'
+	x11.xcb.xcb_open_font(x11.conn, font, #name, name)
+end
+
 local clws, windows
 
 clws = {
@@ -14,7 +29,7 @@ setmetatable(clws, { __call = function(_, xwin, get)
 	if clws.cache[xwin] then
 		return clws.cache[xwin]
 	elseif windows.cache[xwin] then
-		print('TODO', 'turn window into clw')
+		return windows.cache[xwin].as_clw
 	else
 		return get(xwin)
 	end
@@ -52,16 +67,27 @@ function clws.tiled(xclw)
 	local win = {
 		type = 'clw';
 		parents = {};
+		as_clw = {};
 	}
+
+	clw.win = win
 
 	-- Create frame window
 	do
 		win.xwin = x11.xcb.xcb_generate_id(x11.conn)
 		windows.cache[win.xwin] = win
-		local values = ffi.new('int32_t[2]',
+		local values = ffi.new('int32_t[3]',
 			1,
-			bit.bor(unpack({
-				x11.xcb.XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+			bit.bor(unpack({ 0;
+				-- x11.xcb.XCB_EVENT_MASK_BUTTON_PRESS;
+				-- x11.xcb.XCB_EVENT_MASK_BUTTON_RELEASE;
+				-- x11.xcb.XCB_EVENT_MASK_POINTER_MOTION;
+				x11.xcb.XCB_EVENT_MASK_EXPOSURE;
+				-- x11.xcb.XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+				x11.xcb.XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT;
+				x11.xcb.XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
+				-- x11.xcb.XCB_EVENT_MASK_ENTER_WINDOW;
+				-- x11.xcb.XCB_EVENT_MASK_STRUCTURE_NOTIFY;
 			}))
 		)
 		x11.xcb.xcb_create_window(x11.conn,
@@ -81,15 +107,48 @@ function clws.tiled(xclw)
 		)
 	end
 
+	-- Listen on the clw window
+	do
+		x11.change_window_attributes(clw.xwin, {
+			event_mask = bit.bor(unpack({ 0;
+				x11.xcb.XCB_EVENT_MASK_STRUCTURE_NOTIFY;
+				x11.xcb.XCB_EVENT_MASK_PROPERTY_CHANGE;
+			}));
+		})
+	end
+
 	-- Move clw window under frame window
 	do
 		x11.reparent(clw.xwin, win.xwin)
 		x11.map(clw.xwin)
 	end
 
+	local function update_title()
+		local ascii_cookie = x11.get_property(clw.xwin, x11.xcb.XCB_ATOM_WM_NAME, 128)
+		local utf8_cookie = x11.get_property(clw.xwin, x11.A._NET_WM_NAME, 128)
+
+		local ascii_val = ascii_cookie()
+		win.ascii_title = ffi.string(ascii_val.ptr, ascii_val.len)
+		
+		local utf8_val = utf8_cookie()
+		win.utf8_title = ffi.string(utf8_val.ptr, utf8_val.len)
+
+		win.title = (win.utf8_title or win.ascii_title) .. ' (' .. win.xwin .. ' ' .. clw.xwin .. ')'
+	end
+
+	update_title()
+
 	function clw.map_request(ev)
 		if not win.parent then
 			windows.add(win)
+		end
+	end
+
+	function clw.property_change(ev)
+		if ev.atom == x11.xcb.XCB_ATOM_WM_NAME then
+			update_title()
+		elseif ev.atom == x11.A._NET_WM_NAME then
+			update_title()
 		end
 	end
 
@@ -122,10 +181,20 @@ function clws.tiled(xclw)
 		win.y = move.y
 		win.width = move.width
 		win.height = move.height
+		win.external_title = move.external_title
 
 		x11.move(win.xwin, win.x, win.y, win.width, win.height)
+
+		local x, y, width, height = 0, 0, win.width, win.height
+		if not move.external_title then
+			y = y + 18
+			height = height - 18
+		end
+		x = x + 2
+		width = width - 4
+		height = height - 2
 		-- TODO: make the frame optional
-		x11.move(clw.xwin, 2, 0, win.width - 4, win.height - 2)
+		x11.move(clw.xwin, x, y, width, height)
 	end
 
 	function win.off()
@@ -135,6 +204,47 @@ function clws.tiled(xclw)
 
 	function win.add(new, dir)
 		win.parent.add(new, 'up')
+	end
+
+
+	function win.as_clw.expose(ev)
+		local rects = ffi.new('xcb_rectangle_t[1]')
+
+		x11.change_gc(gc, {
+			foreground = x11.screen.white_pixel;
+			line_width = 2;
+		})
+		rects[0].x = 1
+		rects[0].y = 1
+		rects[0].width = win.width - 2
+		rects[0].height = win.height - 2
+		x11.xcb.xcb_poly_rectangle(x11.conn, win.xwin, gc, 1, rects)
+
+		x11.change_gc(gc, {
+			foreground = x11.screen.black_pixel;
+		})
+		rects[0].x = 1
+		rects[0].y = 1
+		rects[0].width = win.width - 2
+		rects[0].height = 16
+		x11.xcb.xcb_poly_fill_rectangle(x11.conn, win.xwin, gc, 1, rects)
+
+		x11.change_gc(gc, {
+			foreground = x11.screen.white_pixel;
+			line_width = 1;
+		})
+		rects[0].x = 0
+		rects[0].y = 0
+		rects[0].width = win.width - 1
+		rects[0].height = 17
+		x11.xcb.xcb_poly_rectangle(x11.conn, win.xwin, gc, 1, rects)
+
+		x11.change_gc(gc, {
+			font = font;
+			foreground = x11.screen.white_pixel;
+			background = x11.screen.black_pixel;
+		})
+		x11.xcb.xcb_image_text_8(x11.conn, #win.title, win.xwin, gc, 5, 12, win.title)
 	end
 
 	return clw
@@ -191,8 +301,7 @@ function windows.hsplit()
 		windows.cache[win.xwin] = win
 		local values = ffi.new('int32_t[2]',
 			1,
-			bit.bor(unpack({
-				0;
+			bit.bor(unpack({ 0;
 			}))
 		)
 		x11.xcb.xcb_create_window(x11.conn,
@@ -275,6 +384,10 @@ function windows.hsplit()
 		win.parents[parent] = true
 	end
 
+	function win.removed_from(parent)
+		win.parents[parent] = nil
+	end
+
 	function win.move(move)
 		if not win.parent then
 			x11.map(win.xwin)
@@ -292,6 +405,11 @@ function windows.hsplit()
 		for _, child in ipairs(win.children) do
 			r(child, split_move)
 		end
+	end
+
+	function win.off()
+		x11.unmap(win.xwin)
+		win.parent = nil
 	end
 
 	return win
