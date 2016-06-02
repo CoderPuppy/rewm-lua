@@ -1,23 +1,32 @@
-local x11 = require 'x11'
 local pl = require 'pl.import_into' ()
+local ffi = require 'ffi'
+local uv = require 'luv'
+
+local x11 = require 'x11'
 
 local function gen_id()
 	return tostring({}):match('^table: 0x....(.+)$')
 end
 
 local windows = {
-	cache = setmetatable({}, { __mode = 'v' });
+	cache = setmetatable({}, {
+		-- __mode = 'v';
+	});
 }
 
 local function Window(win)
 	local required = {
 		'add';
-		'move';
 		'replace';
+		'remove';
+
 		'put_under';
 		'removed_from';
+
 		'on';
 		'off';
+
+		'move';
 	}
 	local missing
 	for _, name in ipairs(required) do
@@ -32,6 +41,8 @@ local function Window(win)
 
 	win.parents = {}
 
+	windows.cache[win.xwin] = win
+
 	do
 		local old_put_under = win.put_under
 		function win.put_under(parent)
@@ -45,6 +56,25 @@ local function Window(win)
 		function win.removed_from(parent)
 			win.parents[parent] = nil
 			old_removed_from(parent)
+		end
+	end
+
+	do
+		local old_on = win.on
+		function win.on(...)
+			print('on', win.xwin)
+			x11.map(win.xwin)
+			old_on(...)
+			win.move(...)
+		end
+	end
+
+	do
+		local old_off = win.off
+		function win.off(...)
+			print('off', win.xwin)
+			old_off(...)
+			x11.unmap(win.xwin)
 		end
 	end
 
@@ -77,10 +107,10 @@ end })
 function windows.auto(xwin)
 	local attrs = x11.get_window_attributes(xwin)()
 
-	if attrs.override_redirect then
-		return windows.oclw(xwin)
-	else
+	if attrs.override_redirect == 0 then
 		return windows.clw(xwin)
+	else
+		return windows.oclw(xwin)
 	end
 end
 
@@ -99,17 +129,31 @@ function windows.oclw(xwin)
 		xwin = xwin;
 	}
 
+	windows.cache[xwin] = win
+
 	return win
 end
 
-function windows.clw(xwin)
+function windows.clw(clw)
+	print('clw', clw)
+
 	local win = {
 		type = 'clw';
 		clw = clw;
 		needs_title = true;
 	}
 
+	windows.cache[clw] = win
+
+	do
+		local values = ffi.new('int32_t[1]', bit.bor(
+			x11.xcb.XCB_EVENT_MASK_STRUCTURE_NOTIFY
+		))
+		x11.xcb.xcb_change_window_attributes(x11.conn, clw, x11.xcb.XCB_CW_EVENT_MASK, values)
+	end
+
 	win.xwin = x11.xcb.xcb_generate_id(x11.conn)
+	print('frame', win.xwin)
 	x11.xcb.xcb_create_window(x11.conn,
 		0, -- depth = copy from parent
 		win.xwin, -- window
@@ -130,6 +174,7 @@ function windows.clw(xwin)
 	end
 
 	function win.move(parent, x, y, width, height)
+		print('move', win.clw, win.xwin, 2, 0, width - 4, height - 2)
 		x11.move(win.clw, 2, 0, width - 4, height - 2)
 	end
 
@@ -146,7 +191,13 @@ function windows.clw(xwin)
 	function win.replace(prev, new)
 	end
 
+	function win.remove(child)
+	end
+
 	Window(win)
+
+	x11.reparent(clw, win.xwin)
+	x11.map(clw)
 
 	return win
 end
@@ -286,39 +337,71 @@ function windows.hsplit()
 	return con
 end
 
-local root = {
-	type = 'root';
-	-- xwin = x11.screen.root;
-	xwin = 'root';
-	x = 0; y = 0;
-	width = 1600; height = 900;
-}
+local root
+do
+	root = {
+		type = 'root';
+	}
 
-function root.add(win, dir)
-	if dir == 'up' then
-		print('TODO', 'root.add')
-	elseif dir == 'down' then
-		if root.child then
-			return root.child.add(win, 'down')
-		else
-			root.child = win
+	local geom = x11.get_geometry(x11.screen.root)()
+	root.x = geom.x
+	root.y = geom.y
+	root.width = geom.width
+	root.height = geom.height
+
+	root.xwin = x11.screen.root
+	-- root.xwin = x11.xcb.xcb_generate_id(x11.conn)
+	print('root', root.xwin)
+	-- x11.xcb.xcb_create_window(x11.conn,
+	-- 	0, -- depth: copy from parent
+	-- 	root.xwin, -- window
+	-- 	x11.screen.root, -- parent
+	-- 	root.x, root.y, -- x, y
+	-- 	root.width, root.height, -- width, height
+	-- 	0, -- border width
+	-- 	x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
+	-- 	x11.screen.root_visual, -- visual
+	-- 	0, -- values mask
+	-- 	nil -- values
+	-- )
+
+	windows.cache[root.xwin] = root
+
+	-- x11.map(root.xwin)
+
+	function root.add(win, dir)
+		if dir == 'up' then
+			print('TODO', 'root.add')
 			win.put_under(root)
 			win.on(root, root.x, root.y, root.width, root.height)
+		elseif dir == 'down' then
+			if root.child then
+				return root.child.add(win, 'down')
+			else
+				root.child = win
+				win.put_under(root)
+				win.on(root, root.x, root.y, root.width, root.height)
+			end
 		end
 	end
-end
 
-function root.replace(prev, new)
-	if root.child == prev then
+	function root.replace(prev, new)
 		root.child = new
 		prev.off()
 		new.on(root, root.x, root.y, root.width, root.height)
 	end
-end
 
-function root.redraw_frame()
-	if root.child.needs_title then
-		print('redraw', 'root', 'frame')
+	function root.remove(child)
+		print('root.remove')
+		root.child = nil
+		child.removed_from(root)
+		child.off()
+	end
+
+	function root.redraw_frame()
+		if root.child.needs_title then
+			print('redraw', 'root', 'frame')
+		end
 	end
 end
 
@@ -337,6 +420,15 @@ function windows.replace(prev, new)
 	if focused == prev then
 		focused = new
 		-- print('focus', focused.xwin)
+	end
+end
+
+function windows.remove(win)
+	if focused == win then
+		focused = win.parent or root
+	end
+	for parent in pairs(win.parents) do
+		parent.remove(win)
 	end
 end
 

@@ -39,8 +39,6 @@ x11.flush()
 while true do
 	local ev = x11.xcb.xcb_wait_for_event(x11.conn)
 
-	print('got ev')
-
 	local typ = ffi.string(xcb_util.xcb_event_get_label(bit.band(ev.response_type, bit.bnot(0x80))))
 
 	print('event', typ)

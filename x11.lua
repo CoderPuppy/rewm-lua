@@ -5,7 +5,7 @@ local uv = require 'luv'
 local x11 = {}
 
 -- Load xcb
-local xcb, xcb_randr, xcb_xinerama
+local xcb, xcb_randr, xcb_xinerama, xcb_util, xcb_shape
 do
 	local h = io.open('xcb.h', 'r')
 	local d = h:read '*a'
@@ -16,11 +16,13 @@ do
 	xcb_randr = ffi.load 'xcb-randr'
 	xcb_xinerama = ffi.load 'xcb-xinerama'
 	xcb_util = ffi.load 'xcb-util'
+	xcb_shape = ffi.load 'xcb-shape'
 
 	x11.xcb = xcb
 	x11.xcb_randr = xcb_randr
 	x11.xcb_xinerama = xcb_xinerama
 	x11.xcb_util = xcb_util
+	x11.xcb_shape = xcb_shape
 end
 
 -- Connect
@@ -121,36 +123,83 @@ function x11.xinerama_screens()
 end
 
 function x11.map(win)
+	print('map', win)
 	xcb.xcb_map_window(conn, win)
 end
 
 function x11.unmap(win)
+	print('unmap', win)
 	xcb.xcb_unmap_window(conn, win)
+end
+
+function x11.reparent(win, parent, x, y)
+	print('reparent', win, parent)
+	xcb.xcb_reparent_window(conn, win, parent, x or 0, y or 0)
+end
+
+function x11.move(win, x, y, width, height)
+	local values = ffi.new('int32_t[4]',
+		ffi.cast('int32_t', x),
+		ffi.cast('int32_t', y),
+		ffi.cast('uint32_t', width),
+		ffi.cast('uint32_t', height)
+	)
+	xcb.xcb_configure_window(conn, win, bit.bor(
+		xcb.XCB_CONFIG_WINDOW_X,
+		xcb.XCB_CONFIG_WINDOW_Y,
+		xcb.XCB_CONFIG_WINDOW_WIDTH,
+		xcb.XCB_CONFIG_WINDOW_HEIGHT
+	), values)
 end
 
 function x11.flush()
 	xcb.xcb_flush(conn)
 end
 
+function x11.get_window_attributes(win)
+	local cookie = xcb.xcb_get_window_attributes_unchecked(conn, win)
+	return function()
+		local reply = xcb.xcb_get_window_attributes_reply(conn, cookie, nil)
+		return reply
+	end
+end
+
+function x11.get_geometry(win)
+	local cookie = xcb.xcb_get_geometry_unchecked(conn, win)
+	return function()
+		local reply = xcb.xcb_get_geometry_reply(conn, cookie, nil)
+		return reply
+	end
+end
+
 local handlers = {}
 x11.handlers = handlers
 
+-- this triggers the loop when there's data on the xcb fd
 local xcb_poll = uv.new_poll(xcb.xcb_get_file_descriptor(conn))
 uv.poll_start(xcb_poll, 'r', function(err, events)
 	if err then
 		error(err)
 	end
+end)
 
+-- this runs every time before waiting
+local xcb_prepare = uv.new_prepare()
+uv.prepare_start(xcb_prepare, function()
+	x11.flush()
+	
 	while true do
 		local ev = xcb.xcb_poll_for_event(conn)
 		if ev == nil then break end
 
 		local typ = ffi.string(xcb_util.xcb_event_get_label(bit.band(ev.response_type, bit.bnot(0x80))))
 
-		print('event', typ)
-
 		repeat
 			local handler = handlers[typ]
+
+			if handler then
+				print('  handled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
+			end
 			if not handler then
 				io.stderr:write('unhandled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')\n')
 				break
@@ -158,6 +207,8 @@ uv.poll_start(xcb_poll, 'r', function(err, events)
 			handler[2](ffi.cast(handler[1] .. '*', ev))
 		until true
 	end
+
+	x11.flush()
 end)
 
 return x11

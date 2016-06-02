@@ -7,3 +7,4 @@
 #include<xcb/xcb_icccm.h>
 #include<xcb/randr.h>
 #include<xcb/xinerama.h>
+#include<xcb/shape.h>

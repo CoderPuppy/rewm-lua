@@ -1,47 +1,40 @@
 trait Window {
   def title: String
-  def needs_title: Boolean
 }
 
-trait Client <: Window {
-  def needs_title = true
+trait Client extends Window {
 }
 
-trait Container <: Window {
-  def children: List[Window]
+trait Container extends Window {
+  def children: Seq[Window]
 }
 
-trait Split <: Container {
-  var children: List[(Window, Int)]
-  def Container.children = children.map(_._1)
+trait Split extends Container {
+  var children: List[Window]
+  var sizes: Map[Window, Float]
 }
 
-trait HSplit <: Split {
+trait HSplit extends Split {
   def title = "hsplit"
-  def needs_title = false
 }
 
-trait VSplit <: Split {
+trait VSplit extends Split {
   def title = "vsplit"
-  def needs_title = false
 }
 
-trait Tabbed <: Container {
+trait Tabbed extends Container {
   def title = "tabbed"
-  def needs_title = false
   var children: List[Window]
 }
 
-trait Stacked <: Container {
+trait Stacked extends Container {
   def title = "stacked"
-  def needs_title = false
   var children: List[Window]
 }
 
-trait Floating <: Container {
+trait Floating extends Container {
   def title = "floating"
-  def needs_title = false
   var primary: Option[Window]
-  var children: List[Window]
-  def Container.children = primary ++ children
+  var floating: List[Window]
+  def children = (primary ++ floating).toSeq
 }
