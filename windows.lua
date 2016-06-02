@@ -19,10 +19,10 @@ do
 	x11.xcb.xcb_open_font(x11.conn, font, #name, name)
 end
 
-local clws, windows
+local clws, tiles
 
-local function destroy_win(win)
-	windows.cache[win.xwin] = nil
+local function destroy_tile(tile)
+	tiles.cache[tile.xwin] = nil
 end
 
 local function destroy_clw(clw)
@@ -36,8 +36,8 @@ clws = {
 setmetatable(clws, { __call = function(_, xwin, get)
 	if clws.cache[xwin] then
 		return clws.cache[xwin]
-	elseif windows.cache[xwin] then
-		return windows.cache[xwin].as_clw
+	elseif tiles.cache[xwin] then
+		return tiles.cache[xwin].as_clw
 	else
 		return get(xwin)
 	end
@@ -59,32 +59,32 @@ function clws.auto(xwin)
 	local attrs = x11.get_window_attributes(xwin)()
 
 	if attrs.override_redirect == 0 then
-		return clws.tiled(xwin)
+		return clws.tile(xwin)
 	else
 		return clws.unmanaged(xwin)
 	end
 end
 
-function clws.tiled(xclw)
+function clws.tile(xclw)
 	local clw = {
-		type = 'tiled';
+		type = 'tile';
 		xwin = xclw;
 	}
 	clws.cache[clw.xwin] = clw
 
-	local win = {
+	local tile = {
 		type = 'clw';
 		parents = {};
 		as_clw = {};
 	}
 
-	clw.win = win
+	clw.tile = tile
 
-	-- Create frame window
+	-- Create frame tileow
 	do
-		win.xwin = x11.xcb.xcb_generate_id(x11.conn)
-		win.as_clw.xwin = win.xwin
-		windows.cache[win.xwin] = win
+		tile.xwin = x11.xcb.xcb_generate_id(x11.conn)
+		tile.as_clw.xwin = tile.xwin
+		tiles.cache[tile.xwin] = tile
 		local values = ffi.new('int32_t[3]',
 			1,
 			bit.bor(unpack({ 0;
@@ -101,7 +101,7 @@ function clws.tiled(xclw)
 		)
 		x11.xcb.xcb_create_window(x11.conn,
 			0, -- depth: copy from parent
-			win.xwin, -- window
+			tile.xwin, -- tileow
 			x11.screen.root, -- parent
 			0, 0, -- x, y
 			1, 1, -- width, height
@@ -116,7 +116,7 @@ function clws.tiled(xclw)
 		)
 	end
 
-	-- Listen on the clw window
+	-- Listen on the clw tileow
 	do
 		x11.change_window_attributes(clw.xwin, {
 			event_mask = bit.bor(unpack({ 0;
@@ -126,9 +126,9 @@ function clws.tiled(xclw)
 		})
 	end
 
-	-- Move clw window under frame window
+	-- Move clw tileow under frame tileow
 	do
-		x11.reparent(clw.xwin, win.xwin)
+		x11.reparent(clw.xwin, tile.xwin)
 		x11.map(clw.xwin)
 	end
 
@@ -137,19 +137,19 @@ function clws.tiled(xclw)
 		local utf8_cookie = x11.get_property(clw.xwin, x11.A._NET_WM_NAME, 128)
 
 		local ascii_val = ascii_cookie()
-		win.ascii_title = ffi.string(ascii_val.ptr, ascii_val.len)
+		tile.ascii_title = ffi.string(ascii_val.ptr, ascii_val.len)
 		
 		local utf8_val = utf8_cookie()
-		win.utf8_title = ffi.string(utf8_val.ptr, utf8_val.len)
+		tile.utf8_title = ffi.string(utf8_val.ptr, utf8_val.len)
 
-		win.title = (win.utf8_title or win.ascii_title) .. ' (' .. win.xwin .. ' ' .. clw.xwin .. ')'
+		tile.title = (tile.utf8_title or tile.ascii_title) .. ' (' .. tile.xwin .. ' ' .. clw.xwin .. ')'
 	end
 
 	update_title()
 
 	function clw.map_request(ev)
-		if not win.parent then
-			windows.add(win)
+		if not tile.parent then
+			tiles.add(tile)
 		end
 	end
 
@@ -162,39 +162,39 @@ function clws.tiled(xclw)
 	end
 
 	function clw.destroyed(ev)
-		windows.remove(win)
-		x11.destroy_window(win.xwin)
+		tiles.remove(tile)
+		x11.destroy_window(tile.xwin)
 		destroy_clw(clw)
-		destroy_win(win)
+		destroy_tile(tile)
 	end
 
 	-- TODO: pull out duplicate code
 	
-	function win.put_under(parent)
-		win.parents[parent] = true
+	function tile.put_under(parent)
+		tile.parents[parent] = true
 	end
 
-	function win.removed_from(parent)
-		win.parents[parent] = nil
+	function tile.removed_from(parent)
+		tile.parents[parent] = nil
 	end
 
-	function win.move(move)
-		if not win.parent then
+	function tile.move(move)
+		if not tile.parent then
 			-- containers should handle reparenting
-			x11.map(win.xwin)
+			x11.map(tile.xwin)
 		end
 
-		print('move', win.xwin, move.parent.xwin, move.x, move.y, move.width, move.height)
-		win.parent = move.parent
-		win.x = move.x
-		win.y = move.y
-		win.width = move.width
-		win.height = move.height
-		win.external_title = move.external_title
+		print('move', tile.xwin, move.parent.xwin, move.x, move.y, move.width, move.height)
+		tile.parent = move.parent
+		tile.x = move.x
+		tile.y = move.y
+		tile.width = move.width
+		tile.height = move.height
+		tile.external_title = move.external_title
 
-		x11.move(win.xwin, win.x, win.y, win.width, win.height)
+		x11.move(tile.xwin, tile.x, tile.y, tile.width, tile.height)
 
-		local x, y, width, height = 0, 0, win.width, win.height
+		local x, y, width, height = 0, 0, tile.width, tile.height
 		if not move.external_title then
 			y = y + 18
 			height = height - 18
@@ -206,17 +206,17 @@ function clws.tiled(xclw)
 		x11.move(clw.xwin, x, y, width, height)
 	end
 
-	function win.off()
-		x11.unmap(win.xwin)
-		win.parent = nil
+	function tile.off()
+		x11.unmap(tile.xwin)
+		tile.parent = nil
 	end
 
-	function win.add(new, dir)
-		win.parent.add(new, 'up')
+	function tile.add(new, dir)
+		tile.parent.add(new, 'up')
 	end
 
 
-	function win.as_clw.expose(ev)
+	function tile.as_clw.expose(ev)
 		local rects = ffi.new('xcb_rectangle_t[1]')
 
 		x11.change_gc(gc, {
@@ -225,18 +225,18 @@ function clws.tiled(xclw)
 		})
 		rects[0].x = 1
 		rects[0].y = 1
-		rects[0].width = win.width - 2
-		rects[0].height = win.height - 2
-		x11.xcb.xcb_poly_rectangle(x11.conn, win.xwin, gc, 1, rects)
+		rects[0].width = tile.width - 2
+		rects[0].height = tile.height - 2
+		x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
 
 		x11.change_gc(gc, {
 			foreground = x11.screen.black_pixel;
 		})
 		rects[0].x = 1
 		rects[0].y = 1
-		rects[0].width = win.width - 2
+		rects[0].width = tile.width - 2
 		rects[0].height = 16
-		x11.xcb.xcb_poly_fill_rectangle(x11.conn, win.xwin, gc, 1, rects)
+		x11.xcb.xcb_poly_fill_rectangle(x11.conn, tile.xwin, gc, 1, rects)
 
 		x11.change_gc(gc, {
 			foreground = x11.screen.white_pixel;
@@ -244,28 +244,28 @@ function clws.tiled(xclw)
 		})
 		rects[0].x = 0
 		rects[0].y = 0
-		rects[0].width = win.width - 1
+		rects[0].width = tile.width - 1
 		rects[0].height = 17
-		x11.xcb.xcb_poly_rectangle(x11.conn, win.xwin, gc, 1, rects)
+		x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
 
 		x11.change_gc(gc, {
 			font = font;
 			foreground = x11.screen.white_pixel;
 			background = x11.screen.black_pixel;
 		})
-		x11.xcb.xcb_image_text_8(x11.conn, #win.title, win.xwin, gc, 5, 12, win.title)
+		x11.xcb.xcb_image_text_8(x11.conn, #tile.title, tile.xwin, gc, 5, 12, tile.title)
 	end
 
 	return clw
 end
 
-windows = {
+tiles = {
 	cache = {};
 }
 
-setmetatable(windows, { __call = function(_, xwin, get)
-	if windows.cache[xwin] then
-		return windows.cache[xwin]
+setmetatable(tiles, { __call = function(_, xwin, get)
+	if tiles.cache[xwin] then
+		return tiles.cache[xwin]
 	else
 		return get(xwin)
 	end
@@ -296,26 +296,26 @@ local function split_resizer(con, con_size)
 	return r
 end
 
-function windows.hsplit()
-	local win = {
+function tiles.hsplit()
+	local tile = {
 		type = 'hsplit';
 		parents = {};
 		children = {};
 		sizes = {};
 	}
 
-	-- Create window
+	-- Create tileow
 	do
-		win.xwin = x11.xcb.xcb_generate_id(x11.conn)
-		windows.cache[win.xwin] = win
+		tile.xwin = x11.xcb.xcb_generate_id(x11.conn)
+		tiles.cache[tile.xwin] = tile
 		local values = ffi.new('int32_t[2]',
 			1,
 			bit.bor(unpack({ 0;
 			}))
 		)
-		x11.xcb.xcb_create_window(x11.conn,
+		x11.xcb.xcb_create_tileow(x11.conn,
 			0, -- depth: copy from parent
-			win.xwin, -- window
+			tile.xwin, -- tileow
 			x11.screen.root, -- parent
 			0, 0, -- x, y
 			1, 1, -- width, height
@@ -331,97 +331,97 @@ function windows.hsplit()
 	end
 
 	local function split_move(child, x, width)
-		if child.parent ~= win then
-			x11.reparent(child.xwin, win.xwin)
+		if child.parent ~= tile then
+			x11.reparent(child.xwin, tile.xwin)
 		end
 		child.move {
-			parent = win;
+			parent = tile;
 			x = x;
 			y = 0;
 			width = width;
-			height = win.height;
+			height = tile.height;
 		}
 	end
 
-	function win.add(new)
-		new.put_under(win)
+	function tile.add(new)
+		new.put_under(tile)
 
-		local num = #win.children
+		local num = #tile.children
 		local factor = num / (num + 1)
 		
-		local r = split_resizer(win, win.width)
-		for _, child in ipairs(win.children) do
-			win.sizes[child] = win.sizes[child] * factor
+		local r = split_resizer(tile, tile.width)
+		for _, child in ipairs(tile.children) do
+			tile.sizes[child] = tile.sizes[child] * factor
 			r(child, split_move)
 		end
 
-		win.children[#win.children + 1] = new
-		win.sizes[new] = 1 / (num + 1)
+		tile.children[#tile.children + 1] = new
+		tile.sizes[new] = 1 / (num + 1)
 		r(new, split_move)
 	end
 
-	function win.remove(prev)
-		prev.removed_from(win)
-		if win.parent then
+	function tile.remove(prev)
+		prev.removed_from(tile)
+		if tile.parent then
 			prev.off()
 		end
 
-		if #win.children == 1 then
-			windows.remove(win)
-			x11.destroy_window(win.xwin)
-			destroy_win(win)
+		if #tile.children == 1 then
+			tiles.remove(tile)
+			x11.destroy_tileow(tile.xwin)
+			destroy_tile(tile)
 		else
-			local amt = win.sizes[prev] / (#win.children - 1)
-			local r = split_resizer(win, win.width)
+			local amt = tile.sizes[prev] / (#tile.children - 1)
+			local r = split_resizer(tile, tile.width)
 			local prev_i
-			for i, child in ipairs(win.children) do
+			for i, child in ipairs(tile.children) do
 				if child == prev then
 					prev_i = i
 				else
-					win.sizes[child] = win.sizes[child] + amt
+					tile.sizes[child] = tile.sizes[child] + amt
 					r(child, split_move)
 				end
 			end
 			if prev_i then
-				table.remove(win.children, prev_i)
+				table.remove(tile.children, prev_i)
 			end
-			win.sizes[prev] = nil
+			tile.sizes[prev] = nil
 		end
 	end
 
-	function win.put_under(parent)
-		win.parents[parent] = true
+	function tile.put_under(parent)
+		tile.parents[parent] = true
 	end
 
-	function win.removed_from(parent)
-		win.parents[parent] = nil
+	function tile.removed_from(parent)
+		tile.parents[parent] = nil
 	end
 
-	function win.move(move)
-		if not win.parent then
-			x11.map(win.xwin)
+	function tile.move(move)
+		if not tile.parent then
+			x11.map(tile.xwin)
 		end
 
-		win.parent = move.parent
-		win.x = move.x
-		win.y = move.y
-		win.width = move.width
-		win.height = move.height
+		tile.parent = move.parent
+		tile.x = move.x
+		tile.y = move.y
+		tile.width = move.width
+		tile.height = move.height
 
-		x11.move(win.xwin, win.x, win.y, win.width, win.height)
+		x11.move(tile.xwin, tile.x, tile.y, tile.width, tile.height)
 
-		local r = split_resizer(win, win.width)
-		for _, child in ipairs(win.children) do
+		local r = split_resizer(tile, tile.width)
+		for _, child in ipairs(tile.children) do
 			r(child, split_move)
 		end
 	end
 
-	function win.off()
-		x11.unmap(win.xwin)
-		win.parent = nil
+	function tile.off()
+		x11.unmap(tile.xwin)
+		tile.parent = nil
 	end
 
-	return win
+	return tile
 end
 
 local root
@@ -445,7 +445,7 @@ do
 		else
 			if root.child then
 				local prev = root.child
-				local split = windows.hsplit()
+				local split = tiles.hsplit()
 				split.add(prev)
 				split.add(new)
 
@@ -481,23 +481,23 @@ end
 
 local focused = root
 
-function windows.add(win)
+function tiles.add(tile)
 	print(focused.type)
-	focused.add(win, 'down')
-	focused = win
+	focused.add(tile, 'down')
+	focused = tile
 end
 
-function windows.replace(prev, new)
-	print('TODO', 'windows.replace')
+function tiles.replace(prev, new)
+	print('TODO', 'tiles.replace')
 end
 
-function windows.remove(win)
-	if focused == win then
-		focused = win.parent or root
+function tiles.remove(tile)
+	if focused == tile then
+		focused = tile.parent or root
 	end
-	for parent in pairs(win.parents) do
-		parent.remove(win)
+	for parent in pairs(tile.parents) do
+		parent.remove(tile)
 	end
 end
 
-return {clws, windows}
+return {clws, tiles}

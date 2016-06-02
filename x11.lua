@@ -220,7 +220,6 @@ do
 
 		for _, attr in ipairs(gc_attrs) do
 			if attrs[attr[1]] then
-				print('adding', attr[1])
 				mask = bit.bor(mask, attr[2])
 				values[i] = ffi.cast(attr[3], attrs[attr[1]])
 				i = i + 1
@@ -296,7 +295,7 @@ x11.tick_tasks[#x11.tick_tasks + 1] = {'x11 poll', function()
 				print('  handled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
 			end
 			if not handler then
-				print('unhandled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')\n')
+				print('unhandled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
 				break
 			end
 			handler[2](ffi.cast(handler[1] .. '*', ev))

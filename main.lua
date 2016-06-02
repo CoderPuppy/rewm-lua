@@ -3,7 +3,7 @@ local pl = require 'pl.import_into' ()
 local uv = require 'luv'
 
 local x11 = require 'x11'
-local clws, windows = table.unpack(require 'windows')
+local clws, tiles = table.unpack(require 'tiles')
 
 local A = x11.A
 
@@ -30,8 +30,8 @@ do
 	for i = 1, children_len do
 		local xwin = children[i - 1]
 		local clw = clws(xwin, clws.auto)
-		if clw.type == 'tiled' then
-			windows.add(clw.win)
+		if clw.type == 'tile' then
+			tiles.add(clw.tile)
 		end
 	end
 	x11.flush()
