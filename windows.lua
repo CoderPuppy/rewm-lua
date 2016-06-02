@@ -21,6 +21,14 @@ end
 
 local clws, windows
 
+local function destroy_win(win)
+	windows.cache[win.xwin] = nil
+end
+
+local function destroy_clw(clw)
+	clws.cache[clw.xwin] = nil
+end
+
 clws = {
 	cache = {};
 }
@@ -75,6 +83,7 @@ function clws.tiled(xclw)
 	-- Create frame window
 	do
 		win.xwin = x11.xcb.xcb_generate_id(x11.conn)
+		win.as_clw.xwin = win.xwin
 		windows.cache[win.xwin] = win
 		local values = ffi.new('int32_t[3]',
 			1,
@@ -155,8 +164,8 @@ function clws.tiled(xclw)
 	function clw.destroyed(ev)
 		windows.remove(win)
 		x11.destroy_window(win.xwin)
-		clws.cache[clw.xwin] = nil
-		windows.cache[win.xwin] = nil
+		destroy_clw(clw)
+		destroy_win(win)
 	end
 
 	-- TODO: pull out duplicate code
@@ -360,7 +369,7 @@ function windows.hsplit()
 		if #win.children == 1 then
 			windows.remove(win)
 			x11.destroy_window(win.xwin)
-			windows.cache[win.xwin] = nil
+			destroy_win(win)
 		else
 			local amt = win.sizes[prev] / (#win.children - 1)
 			local r = split_resizer(win, win.width)

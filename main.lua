@@ -58,8 +58,7 @@ end}
 
 x11.handlers.Expose = {'xcb_expose_event_t', function(ev)
 	print('expose', ev.window)
-	local clw = clws(ev.window, clws.auto)
-	print(clw.type)
+	local clw = clws(ev.window, clws.dummy)
 	clw.expose(ev)
 end}
 

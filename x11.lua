@@ -278,11 +278,9 @@ uv.poll_start(xcb_poll, 'r', function(err, events)
 	end
 end)
 
--- this runs every time before waiting
-local xcb_prepare = uv.new_prepare()
-uv.prepare_start(xcb_prepare, function()
+x11.tick_tasks = {}
+x11.tick_tasks[#x11.tick_tasks + 1] = {'x11 poll', function()
 	print('poll')
-
 	x11.flush()
 	
 	while true do
@@ -306,6 +304,14 @@ uv.prepare_start(xcb_prepare, function()
 	end
 
 	x11.flush()
+end}
+
+-- this runs every time before waiting
+local xcb_prepare = uv.new_prepare()
+uv.prepare_start(xcb_prepare, function()
+	for _, task in ipairs(x11.tick_tasks) do
+		task[2]()
+	end
 end)
 
 return x11
