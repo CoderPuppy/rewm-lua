@@ -3,7 +3,7 @@ local pl = require 'pl.import_into' ()
 local uv = require 'luv'
 
 local x11 = require 'x11'
-local clws, tiles = table.unpack(require 'tiles')
+local clws, tiles = table.unpack(require 'windows')
 
 local A = x11.A
 
@@ -50,6 +50,16 @@ x11.handlers.MapRequest = {'xcb_map_request_event_t', function(ev)
 	clw.map_request(ev)
 end}
 
+x11.handlers.MapNotify = {'xcb_map_notify_event_t', function(ev)
+	local clw = clws(ev.window, clws.auto)
+	clw.mapped(ev)
+end}
+
+x11.handlers.UnmapNotify = {'xcb_unmap_notify_event_t', function(ev)
+	local clw = clws(ev.window, clws.dummy)
+	clw.unmapped(ev)
+end}
+
 x11.handlers.DestroyNotify = {'xcb_destroy_notify_event_t', function(ev)
 	print('destroy notify', ev.window, ev.event)
 	local clw = clws(ev.window, clws.dummy)
@@ -59,12 +69,13 @@ end}
 x11.handlers.Expose = {'xcb_expose_event_t', function(ev)
 	print('expose', ev.window)
 	local clw = clws(ev.window, clws.dummy)
+	print(clw.type)
 	clw.expose(ev)
 end}
 
 x11.handlers.PropertyNotify = {'xcb_property_notify_event_t', function(ev)
 	print('property change', ev.window)
-	local clw = clws(ev.window, clws.auto)
+	local clw = clws(ev.window, clws.dummy)
 	clw.property_change(ev)
 end}
 

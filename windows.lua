@@ -52,6 +52,12 @@ function clws.dummy(xwin)
 	function clw.destroyed(ev)
 	end
 
+	function clw.unmapped(ev)
+	end
+
+	function clw.expose(ev)
+	end
+
 	return clw
 end
 
@@ -75,12 +81,15 @@ function clws.tile(xclw)
 	local tile = {
 		type = 'clw';
 		parents = {};
-		as_clw = {};
+		as_clw = {
+			type = 'tile[clw].as_clw';
+		};
 	}
 
+	tile.as_clw.tile = tile
 	clw.tile = tile
 
-	-- Create frame tileow
+	-- Create frame window
 	do
 		tile.xwin = x11.xcb.xcb_generate_id(x11.conn)
 		tile.as_clw.xwin = tile.xwin
@@ -101,7 +110,7 @@ function clws.tile(xclw)
 		)
 		x11.xcb.xcb_create_window(x11.conn,
 			0, -- depth: copy from parent
-			tile.xwin, -- tileow
+			tile.xwin, -- window
 			x11.screen.root, -- parent
 			0, 0, -- x, y
 			1, 1, -- width, height
@@ -116,7 +125,7 @@ function clws.tile(xclw)
 		)
 	end
 
-	-- Listen on the clw tileow
+	-- Listen on the clw window
 	do
 		x11.change_window_attributes(clw.xwin, {
 			event_mask = bit.bor(unpack({ 0;
@@ -126,7 +135,7 @@ function clws.tile(xclw)
 		})
 	end
 
-	-- Move clw tileow under frame tileow
+	-- Move clw window under frame window
 	do
 		x11.reparent(clw.xwin, tile.xwin)
 		x11.map(clw.xwin)
@@ -153,6 +162,15 @@ function clws.tile(xclw)
 		end
 	end
 
+	function clw.mapped(ev)
+	end
+
+	function clw.unmapped(ev)
+		tiles.remove(tile)
+		x11.destroy_window(tile.xwin)
+		destroy_tile(tile)
+	end
+
 	function clw.property_change(ev)
 		if ev.atom == x11.xcb.XCB_ATOM_WM_NAME then
 			update_title()
@@ -166,6 +184,12 @@ function clws.tile(xclw)
 		x11.destroy_window(tile.xwin)
 		destroy_clw(clw)
 		destroy_tile(tile)
+	end
+
+	function tile.as_clw.mapped(ev)
+	end
+
+	function tile.as_clw.unmapped(ev)
 	end
 
 	-- TODO: pull out duplicate code
@@ -302,9 +326,13 @@ function tiles.hsplit()
 		parents = {};
 		children = {};
 		sizes = {};
+
+		as_clw = {
+			type = 'tile[hsplit].as_clw';
+		};
 	}
 
-	-- Create tileow
+	-- Create window
 	do
 		tile.xwin = x11.xcb.xcb_generate_id(x11.conn)
 		tiles.cache[tile.xwin] = tile
@@ -313,9 +341,9 @@ function tiles.hsplit()
 			bit.bor(unpack({ 0;
 			}))
 		)
-		x11.xcb.xcb_create_tileow(x11.conn,
+		x11.xcb.xcb_create_window(x11.conn,
 			0, -- depth: copy from parent
-			tile.xwin, -- tileow
+			tile.xwin, -- window
 			x11.screen.root, -- parent
 			0, 0, -- x, y
 			1, 1, -- width, height
@@ -368,7 +396,7 @@ function tiles.hsplit()
 
 		if #tile.children == 1 then
 			tiles.remove(tile)
-			x11.destroy_tileow(tile.xwin)
+			x11.destroy_window(tile.xwin)
 			destroy_tile(tile)
 		else
 			local amt = tile.sizes[prev] / (#tile.children - 1)
@@ -419,6 +447,9 @@ function tiles.hsplit()
 	function tile.off()
 		x11.unmap(tile.xwin)
 		tile.parent = nil
+	end
+
+	function tile.as_clw.mapped(ev)
 	end
 
 	return tile
