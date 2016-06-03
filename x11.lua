@@ -266,8 +266,46 @@ function x11.get_property(win, prop, length)
 	end
 end
 
+local event_types = {
+	error = {'error', 'xcb_generic_error_t*'};
+	CreateNotify = {'create_notify'};
+	MapRequest = {'map_request'};
+	DestroyNotify = {'destroy_notify'};
+	ReparentNotify = {'reparent_notify'};
+	MapNotify = {'map_notify'};
+	UnmapNotify = {'unmap_notify'};
+	ConfigureNotify = {'configure_notify'};
+	Expose = {'expose'};
+	DestroyNotify = {'destroy_notify'};
+}
+
 local handlers = {}
-x11.handlers = handlers
+
+function x11.on(name, fn)
+	local handlers_ = handlers[name]
+	if not handlers_ then
+		handlers_ = {}
+		handlers[name] = handlers_
+	end
+	handlers_[#handlers_ + 1] = fn
+end
+
+x11.on('error', function(ev)
+	io.stderr:write(string.format(
+		'X error: request=%s error=%s\n',
+		ffi.string(x11.xcb_util.xcb_event_get_request_label(ev.major_code)),
+		ffi.string(x11.xcb_util.xcb_event_get_error_label(ev.error_code))
+	))
+end)
+
+local function emit(name, ...)
+	local handlers_ = handlers[name]
+	if not handlers_ then return end
+
+	for _, handler in ipairs(handlers_) do
+		handler(...)
+	end
+end
 
 -- this triggers the loop when there's data on the xcb fd
 local xcb_poll = uv.new_poll(xcb.xcb_get_file_descriptor(conn))
@@ -281,6 +319,10 @@ x11.tick_tasks = {}
 x11.tick_tasks[#x11.tick_tasks + 1] = {'x11 poll', function()
 	print('poll')
 	x11.flush()
+
+	local unmaps = {}
+	local reparents = {}
+	local maps = {}
 	
 	while true do
 		local ev = xcb.xcb_poll_for_event(conn)
@@ -288,22 +330,99 @@ x11.tick_tasks[#x11.tick_tasks + 1] = {'x11 poll', function()
 
 		local typ = ffi.string(xcb_util.xcb_event_get_label(bit.band(ev.response_type, bit.bnot(0x80))))
 
-		repeat
-			local handler = handlers[typ]
+		local name = event_types[typ]
 
-			if handler then
-				print('  handled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
-			end
-			if not handler then
-				print('unhandled event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
-				break
-			end
-			handler[2](ffi.cast(handler[1] .. '*', ev))
-		until true
+		if name then
+			ev = ffi.cast(name[2] or ('xcb_' .. name[1] .. '_event_t*'), ev)
+			print('  known event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
+			emit(name[1], ev)
+		else
+			print('unknown event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
+		end
 	end
 
 	x11.flush()
 end}
+
+do
+	local state
+	local function reset()
+		state = setmetatable({}, { __index = function(t, k)
+			local v = {
+				state = nil;
+				last_ev = nil;
+			}
+
+			t[k] = v
+
+			return v
+		end })
+	end
+	reset()
+
+	local events = {}
+
+	x11.on('map_notify', function(ev)
+		local st = state[ev.window]
+		if st.state == 'reparent_unmap' then
+			local unmap_i
+			for i, ev in ipairs(events) do
+				if ev[2] == st.unmap_ev then
+					unmap_i = i
+				end
+			end
+			if unmap_i then
+				table.remove(events, unmap_i)
+			end
+		end
+		if st.state ~= 'map' and st.state ~= 'reparent_unmap' then
+			table.insert(events, {'map_notify', ev})
+			st.last_ev = ev
+			st.map_ev = ev
+		end
+		st.state = 'map'
+	end)
+
+	x11.on('reparent_notify', function(ev)
+		local st = state[ev.window]
+		if st.state ~= 'reparent' and st.state ~= 'reparent_unmap' then
+			table.insert(events, {'reparent_notify', ev})
+			st.last_ev = ev
+			st.repar_ev = ev
+
+		-- now we know the state is reparent or reparent_unmap
+		-- therefore we need to check if it's the same parameters
+		elseif ev.parent ~= st.last_ev.parent or ev.x ~= st.last_ev.x or ev.y ~= st.last_ev.y or ev.override_redirect ~= st.last_ev.override_redirect then
+			table.insert(events, {'reparent_notify', ev})
+			st.last_ev = ev
+			st.repar_ev = ev
+			st.state = 'reparent'
+		end
+		if st.state == 'unmap' then
+			st.state = 'reparent_unmap'
+		elseif st.state ~= 'reparent_unmap' then
+			st.state = 'reparent'
+		end
+	end)
+
+	x11.on('unmap_notify', function(ev)
+		local st = state[ev.window]
+		if st.state ~= 'unmap' then
+			table.insert(events, {'unmap_notify', ev})
+			st.last_ev = ev
+			st.unmap_ev = ev
+		end
+		st.state = 'unmap'
+	end)
+
+	x11.tick_tasks[#x11.tick_tasks + 1] = {'x11 smooth reparent', function()
+		for _, ev in ipairs(events) do
+			emit('smooth:' .. ev[1], ev[2])
+		end
+		reset()
+		events = {}
+	end}
+end
 
 -- this runs every time before waiting
 local xcb_prepare = uv.new_prepare()

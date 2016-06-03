@@ -19,17 +19,23 @@ do
 	x11.xcb.xcb_open_font(x11.conn, font, #name, name)
 end
 
-local clws, tiles
+local tiles = {
+	cache = {};
+}
+
+setmetatable(tiles, { __call = function(_, xwin, get)
+	if tiles.cache[xwin] then
+		return tiles.cache[xwin]
+	else
+		return get(xwin)
+	end
+end })
 
 local function destroy_tile(tile)
 	tiles.cache[tile.xwin] = nil
 end
 
-local function destroy_clw(clw)
-	clws.cache[clw.xwin] = nil
-end
-
-clws = {
+local clws = {
 	cache = {};
 }
 
@@ -43,20 +49,158 @@ setmetatable(clws, { __call = function(_, xwin, get)
 	end
 end })
 
+local function destroy_clw(clw)
+	clws.cache[clw.xwin] = nil
+end
+
+local function ClW(clw)
+	if not clw.type then
+		error('clw missing type')
+	end
+
+	if not clw.xwin then
+		error('clw missing xwin')
+	end
+
+	for _, name in ipairs({
+		'map_request';
+		'mapped';
+		'unmapped';
+		'destroyed';
+		'expose';
+		'property_change';
+		'focus_in';
+		'focus_out';
+	}) do
+		if clw[name] == nil then
+			clw[name] = function(ev) end
+		elseif type(clw[name]) ~= 'function' then
+			error('bad handler: ' .. tostring(clw.type) .. '.' .. name)
+		end
+	end
+
+	clws.cache[clw.xwin] = clw
+
+	return clw
+end
+
+local call_hook = {'call', function(f, args, rets)
+	return f, args, table.pack(table.unpack(rets, rets.n), table.pack(f(table.unpack(args, 1, args.n))))
+end}
+local Tile; Tile = {
+	add_parent = function(tile, parent)
+		tile.parents[parent] = true
+	end;
+	remove_parent = function(tile, parent)
+		tile.parents[parent] = nil
+	end;
+
+	move_map = function(tile, move)
+		if not tile.parent then
+			-- containers should handle reparenting
+			x11.map(tile.xwin)
+		end
+	end;
+	move_update = function(tile, move)
+		print('move', tile.xwin, move.parent.xwin, move.x, move.y, move.width, move.height)
+		tile.parent = move.parent
+		tile.x = move.x
+		tile.y = move.y
+		tile.width = move.width
+		tile.height = move.height
+		tile.external_title = move.external_title
+	end;
+	move_xwin = function(tile, move)
+		x11.move(tile.xwin, tile.x, tile.y, tile.width, tile.height)
+	end;
+
+	optional = {
+		put_under = function() end;
+		removed_from = function() end;
+	};
+
+	hooks = {
+		put_under = function(tile, f)
+			return function(...)
+				Tile.add_parent(tile, ...)
+				return f(...)
+			end;
+		end;
+
+		removed_from = function(tile, f)
+			return function(...)
+				Tile.remove_parent(tile, ...)
+				return f(...)
+			end;
+		end;
+
+		move = function(tile, f)
+			return function(...)
+				Tile.move_map(tile, ...)
+				Tile.move_update(tile, ...)
+				Tile.move_xwin(tile, ...)
+				return f(...)
+			end
+		end;
+	};
+}
+setmetatable(Tile, { __call = function(_, tile)
+	if not tile.type then
+		error('tile missing type')
+	end
+
+	if not tile.xwin then
+		error('tile missing xwin')
+	end
+
+	if not tile.as_clw then
+		tile.as_clw = {}
+	end
+
+	-- TODO: most of these probably don't need ifs
+	if not tile.as_clw.type then
+		tile.as_clw.type = tile.type .. '.as_clw'
+	end
+
+	if not tile.as_clw.xwin then
+		tile.as_clw.xwin = tile.xwin
+	end
+
+	if not tile.as_clw.tile then
+		tile.as_clw.tile = tile
+	end
+
+	ClW(tile.as_clw)
+
+	if tile.internal_frame == nil then
+		tile.internal_frame = true
+	end
+
+	for k, v in pairs(Tile.optional) do
+		if not tile[k] then
+			tile[k] = v
+		end
+	end
+
+	local old = setmetatable({}, { __index = tile })
+	for k, v in pairs(tile) do
+		if type(v) == 'function' and Tile.hooks[k] then
+			old[k] = v
+			tile[k] = Tile.hooks[k](tile, old[k])
+		end
+	end
+
+	return tile
+end })
+
 function clws.dummy(xwin)
 	local clw = {
 		type = 'dummy';
 		xwin = xwin;
 	}
 
-	function clw.destroyed(ev)
-	end
-
-	function clw.unmapped(ev)
-	end
-
-	function clw.expose(ev)
-	end
+	ClW(clw)
+	clws.cache[clw.xwin] = nil
 
 	return clw
 end
@@ -78,21 +222,20 @@ function clws.tile(xclw)
 	}
 	clws.cache[clw.xwin] = clw
 
+	ClW(clw)
+
 	local tile = {
 		type = 'clw';
 		parents = {};
-		as_clw = {
-			type = 'tile[clw].as_clw';
-		};
+		as_clw = {};
+		clw = clw;
 	}
 
-	tile.as_clw.tile = tile
 	clw.tile = tile
 
 	-- Create frame window
 	do
 		tile.xwin = x11.xcb.xcb_generate_id(x11.conn)
-		tile.as_clw.xwin = tile.xwin
 		tiles.cache[tile.xwin] = tile
 		local values = ffi.new('int32_t[3]',
 			1,
@@ -131,6 +274,7 @@ function clws.tile(xclw)
 			event_mask = bit.bor(unpack({ 0;
 				x11.xcb.XCB_EVENT_MASK_STRUCTURE_NOTIFY;
 				x11.xcb.XCB_EVENT_MASK_PROPERTY_CHANGE;
+				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
 			}));
 		})
 	end
@@ -186,47 +330,19 @@ function clws.tile(xclw)
 		destroy_tile(tile)
 	end
 
-	function tile.as_clw.mapped(ev)
-	end
-
-	function tile.as_clw.unmapped(ev)
-	end
-
 	-- TODO: pull out duplicate code
-	
-	function tile.put_under(parent)
-		tile.parents[parent] = true
-	end
-
-	function tile.removed_from(parent)
-		tile.parents[parent] = nil
-	end
 
 	function tile.move(move)
-		if not tile.parent then
-			-- containers should handle reparenting
-			x11.map(tile.xwin)
-		end
-
-		print('move', tile.xwin, move.parent.xwin, move.x, move.y, move.width, move.height)
-		tile.parent = move.parent
-		tile.x = move.x
-		tile.y = move.y
-		tile.width = move.width
-		tile.height = move.height
-		tile.external_title = move.external_title
-
-		x11.move(tile.xwin, tile.x, tile.y, tile.width, tile.height)
-
 		local x, y, width, height = 0, 0, tile.width, tile.height
 		if not move.external_title then
 			y = y + 18
 			height = height - 18
 		end
-		x = x + 2
-		width = width - 4
-		height = height - 2
-		-- TODO: make the frame optional
+		if tile.internal_frame then
+			x = x + 2
+			width = width - 4
+			height = height - 2
+		end
 		x11.move(clw.xwin, x, y, width, height)
 	end
 
@@ -239,61 +355,54 @@ function clws.tile(xclw)
 		tile.parent.add(new, 'up')
 	end
 
-
 	function tile.as_clw.expose(ev)
 		local rects = ffi.new('xcb_rectangle_t[1]')
 
-		x11.change_gc(gc, {
-			foreground = x11.screen.white_pixel;
-			line_width = 2;
-		})
-		rects[0].x = 1
-		rects[0].y = 1
-		rects[0].width = tile.width - 2
-		rects[0].height = tile.height - 2
-		x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
+		if tile.internal_frame then
+			x11.change_gc(gc, {
+				foreground = x11.screen.white_pixel;
+				line_width = 2;
+			})
+			rects[0].x = 1
+			rects[0].y = 1
+			rects[0].width = tile.width - 2
+			rects[0].height = tile.height - 2
+			x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
+		end
 
-		x11.change_gc(gc, {
-			foreground = x11.screen.black_pixel;
-		})
-		rects[0].x = 1
-		rects[0].y = 1
-		rects[0].width = tile.width - 2
-		rects[0].height = 16
-		x11.xcb.xcb_poly_fill_rectangle(x11.conn, tile.xwin, gc, 1, rects)
+		if not tile.external_title then
+			x11.change_gc(gc, {
+				foreground = x11.screen.black_pixel;
+			})
+			rects[0].x = 1
+			rects[0].y = 1
+			rects[0].width = tile.width - 2
+			rects[0].height = 16
+			x11.xcb.xcb_poly_fill_rectangle(x11.conn, tile.xwin, gc, 1, rects)
 
-		x11.change_gc(gc, {
-			foreground = x11.screen.white_pixel;
-			line_width = 1;
-		})
-		rects[0].x = 0
-		rects[0].y = 0
-		rects[0].width = tile.width - 1
-		rects[0].height = 17
-		x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
+			x11.change_gc(gc, {
+				foreground = x11.screen.white_pixel;
+				line_width = 1;
+			})
+			rects[0].x = 0
+			rects[0].y = 0
+			rects[0].width = tile.width - 1
+			rects[0].height = 17
+			x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
 
-		x11.change_gc(gc, {
-			font = font;
-			foreground = x11.screen.white_pixel;
-			background = x11.screen.black_pixel;
-		})
-		x11.xcb.xcb_image_text_8(x11.conn, #tile.title, tile.xwin, gc, 5, 12, tile.title)
+			x11.change_gc(gc, {
+				font = font;
+				foreground = x11.screen.white_pixel;
+				background = x11.screen.black_pixel;
+			})
+			x11.xcb.xcb_image_text_8(x11.conn, #tile.title, tile.xwin, gc, 5, 12, tile.title)
+		end
 	end
+
+	Tile(tile)
 
 	return clw
 end
-
-tiles = {
-	cache = {};
-}
-
-setmetatable(tiles, { __call = function(_, xwin, get)
-	if tiles.cache[xwin] then
-		return tiles.cache[xwin]
-	else
-		return get(xwin)
-	end
-end })
 
 local function split_resizer(con, con_size)
 	local r = {
@@ -327,9 +436,7 @@ function tiles.hsplit()
 		children = {};
 		sizes = {};
 
-		as_clw = {
-			type = 'tile[hsplit].as_clw';
-		};
+		as_clw = {};
 	}
 
 	-- Create window
@@ -339,6 +446,7 @@ function tiles.hsplit()
 		local values = ffi.new('int32_t[2]',
 			1,
 			bit.bor(unpack({ 0;
+				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
 			}))
 		)
 		x11.xcb.xcb_create_window(x11.conn,
@@ -417,27 +525,7 @@ function tiles.hsplit()
 		end
 	end
 
-	function tile.put_under(parent)
-		tile.parents[parent] = true
-	end
-
-	function tile.removed_from(parent)
-		tile.parents[parent] = nil
-	end
-
 	function tile.move(move)
-		if not tile.parent then
-			x11.map(tile.xwin)
-		end
-
-		tile.parent = move.parent
-		tile.x = move.x
-		tile.y = move.y
-		tile.width = move.width
-		tile.height = move.height
-
-		x11.move(tile.xwin, tile.x, tile.y, tile.width, tile.height)
-
 		local r = split_resizer(tile, tile.width)
 		for _, child in ipairs(tile.children) do
 			r(child, split_move)
@@ -449,8 +537,7 @@ function tiles.hsplit()
 		tile.parent = nil
 	end
 
-	function tile.as_clw.mapped(ev)
-	end
+	Tile(tile)
 
 	return tile
 end
@@ -475,6 +562,8 @@ do
 			root.child.add(new, dir)
 		else
 			if root.child then
+				print('splitting root')
+
 				local prev = root.child
 				local split = tiles.hsplit()
 				split.add(prev)
@@ -495,7 +584,6 @@ do
 					width = root.width;
 					height = root.height;
 
-					-- TODO: handle
 					external_title = false;
 				}
 			end
@@ -510,12 +598,12 @@ do
 	end
 end
 
-local focused = root
+tiles.focused = root
 
 function tiles.add(tile)
-	print(focused.type)
-	focused.add(tile, 'down')
-	focused = tile
+	print(tiles.focused.type)
+	tiles.focused.add(tile, 'down')
+	tiles.focused = tile
 end
 
 function tiles.replace(prev, new)
@@ -523,8 +611,8 @@ function tiles.replace(prev, new)
 end
 
 function tiles.remove(tile)
-	if focused == tile then
-		focused = tile.parent or root
+	if tiles.focused == tile then
+		tiles.focused = tile.parent or root
 	end
 	for parent in pairs(tile.parents) do
 		parent.remove(tile)
