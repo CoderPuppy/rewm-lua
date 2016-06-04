@@ -586,6 +586,9 @@ do
 
 					external_title = false;
 				}
+				x11.flush_buffer()
+				x11.flush()
+				x11.xcb.xcb_set_input_focus(x11.conn, x11.xcb.XCB_INPUT_FOCUS_NONE, new.xwin, x11.xcb.XCB_TIME_CURRENT_TIME)
 			end
 		end
 	end

@@ -44,20 +44,20 @@ end)
 
 x11.on('map_notify', function(ev)
 	local clw = clws(ev.window, clws.auto)
-	print('map notify', clw.type, ev.window)
+	-- print('map notify', clw.type, ev.window)
 	clw.mapped(ev)
 end)
 
 x11.on('smooth:unmap_notify', function(ev)
 	local clw = clws(ev.window, clws.dummy)
-	print('unmap notify', clw.type, ev.window)
+	-- print('unmap notify', clw.type, ev.window)
 	clw.unmapped(ev)
 end)
 
 x11.on('reparent_notify', function(ev)
 	local clw = clws(ev.window, clws.dummy)
 	local parent = clws(ev.parent, clws.dummy)
-	print('reparent notify', clw.type, ev.window, parent.type, ev.parent)
+	-- print('reparent notify', clw.type, ev.window, parent.type, ev.parent)
 end)
 
 x11.on('destroy_notify', function(ev)
@@ -73,19 +73,19 @@ end)
 x11.on('property_notify', function(ev)
 	local reply = x11.xcb.xcb_get_atom_name_reply(x11.conn, x11.xcb.xcb_get_atom_name_unchecked(x11.conn, ev.atom), nil)
 	local clw = clws(ev.window, clws.dummy)
-	print('property_change', clw.type, ev.window, ffi.string(x11.xcb.xcb_get_atom_name_name(reply), x11.xcb.xcb_get_atom_name_name_length(reply)))
+	-- print('property_change', clw.type, ev.window, ffi.string(x11.xcb.xcb_get_atom_name_name(reply), x11.xcb.xcb_get_atom_name_name_length(reply)))
 	clw.property_change(ev)
 end)
 
 x11.on('focus_in', function(ev)
 	local clw = clws(ev.event, clws.dummy)
-	print('focus in', clw.type, ev.event)
+	-- print('focus in', clw.type, ev.event)
 	clw.focus_in(ev)
 end)
 
 x11.on('focus_out', function(ev)
 	local clw = clws(ev.event, clws.dummy)
-	print('focus out', clw.type, ev.event)
+	-- print('focus out', clw.type, ev.event)
 	clw.focus_out(ev)
 end)
 
@@ -94,6 +94,7 @@ uv.signal_start(uv.new_signal(), 'sigint', function()
 	for _, tile in pairs(tiles.cache) do
 		if tile.type == 'clw' then
 			x11.reparent(tile.clw.xwin, x11.screen.root)
+			x11.flush_buffer()
 			x11.xcb_util.xcb_aux_sync(x11.conn)
 		end
 	end
