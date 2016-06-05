@@ -2,6 +2,8 @@ local ffi = require 'ffi'
 local pl = require 'pl.import_into' ()
 local uv = require 'luv'
 
+local xtend = require 'xtend'
+
 local x11 = {}
 x11.tick_tasks = {}
 
@@ -340,52 +342,153 @@ uv.prepare_start(xcb_prepare, function()
 end)
 
 do
-	local out_buffer
-	local function reset()
-		out_buffer = setmetatable({}, { __index = function(out_buffer, win)
-			local out = {
-				map = nil; -- true for map, false for unmap
-				reparent = nil; -- {parent=, x=, y=}
-				destroy = nil;
-				configure = {};
-				attributes = {};
+	local out_buffer = {}
+
+	local job_types = {}
+
+	do
+		local cwa = {
+			{'back_pixmap', xcb.XCB_CW_BACK_PIXMAP, 'xcb_pixmap_t'};
+			{'back_pixel', xcb.XCB_CW_BACK_PIXEL, 'uint32_t'};
+			{'border_pixmap', xcb.XCB_CW_BORDER_PIXMAP, 'xcb_pixmap_t'};
+			{'border_pixel', xcb.XCB_CW_BORDER_PIXEL, 'uint32_t'};
+			{'bit_gravity', xcb.XCB_CW_BIT_GRAVITY, 'uint32_t'};
+			{'win_gravity', xcb.XCB_CW_WIN_GRAVITY, 'uint32_t'};
+			{'backing_stores', xcb.XCB_CW_BACKING_STORE, 'uint32_t'};
+			{'backing_planes', xcb.XCB_CW_BACKING_PLANES, 'uint32_t'};
+			{'backing_pixel', xcb.XCB_CW_BACKING_PIXEL, 'uint32_t'};
+			{'override_redirect', xcb.XCB_CW_OVERRIDE_REDIRECT, 'uint32_t'};
+			{'save_under', xcb.XCB_CW_SAVE_UNDER, 'uint32_t'};
+			{'event_mask', xcb.XCB_CW_EVENT_MASK, 'uint32_t'};
+			{'dont_propogate', xcb.XCB_CW_DONT_PROPAGATE, 'uint32_t'};
+			{'colormap', xcb.XCB_CW_COLORMAP, 'xcb_colormap_t'};
+			{'cursor', xcb.XCB_CW_CURSOR, 'xcb_cursor_t'};
+		}
+
+		local cw = {
+			{'x', xcb.XCB_CONFIG_WINDOW_X, 'int32_t'};
+			{'y', xcb.XCB_CONFIG_WINDOW_Y, 'int32_t'};
+			{'width', xcb.XCB_CONFIG_WINDOW_WIDTH, 'uint32_t'};
+			{'height', xcb.XCB_CONFIG_WINDOW_HEIGHT, 'uint32_t'};
+			{'border_width', xcb.XCB_CONFIG_WINDOW_BORDER_WIDTH, 'uint32_t'};
+			{'sibling', xcb.XCB_CONFIG_WINDOW_SIBLING, 'xcb_window_t'};
+			{'stack_mode', xcb.XCB_CONFIG_WINDOW_STACK_MODE, 'uint32_t'};
+		}
+
+		function job_types.win(name, opts)
+			local old = out_buffer[name]
+			if old then
+				old = old.opts
+			else
+				old = {}
+			end
+			opts = xtend.deep(old, opts)
+			local win = opts.win
+			local job = {
+				fn = function()
+					if opts.destroy then
+						xcb.xcb_destroy_window(conn, win)
+						return
+					end
+
+					if opts.map == false then
+						xcb.xcb_unmap_window(conn, win)
+					end
+					do
+						local repar = opts.reparent
+						if repar then
+							xcb.xcb_reparent_window(conn, win, repar.parent, repar.x, repar.y)
+						end
+					end
+					if opts.map == true then
+						xcb.xcb_map_window(conn, win)
+					end
+					if opts.attributes then
+						local attrs = opts.attributes
+						local mask = 0
+						local values = ffi.new('int32_t[15]')
+						local i = 0
+						for _, attr in ipairs(cwa) do
+							if attrs[attr[1]] then
+								mask = bit.bor(mask, attr[2])
+								values[i] = ffi.cast(attr[3], attrs[attr[1]])
+								i = i + 1
+							end
+						end
+						if mask ~= 0 then
+							xcb.xcb_change_window_attributes(conn, win, mask, values)
+						end
+					end
+					if opts.configure then
+						local configs = opts.configure
+						local mask = 0
+						local values = ffi.new('int32_t[15]')
+						local i = 0
+						for _, config in ipairs(cw) do
+							if configs[config[1]] then
+								mask = bit.bor(mask, config[2])
+								values[i] = ffi.cast(config[3], configs[config[1]])
+								i = i + 1
+							end
+						end
+						if mask ~= 0 then
+							xcb.xcb_configure_window(conn, win, mask, values)
+						end
+					end
+				end;
 				wait_for = {};
+				opts = opts;
 			}
-
-			out_buffer[win] = out
-
-			return out
-		end })
+			if opts.reparent then
+				job.wait_for['win:' .. opts.reparent.parent] = true
+			end
+			return job
+		end
 	end
-	reset()
+
+	local function buffer(name, typ, opts)
+		if not job_types[typ] then
+			error('unknown job type: ' .. tostring(typ))
+		end
+		print('buffer', name)
+		out_buffer[name] = xtend({
+			name = name;
+			typ = typ;
+			opts = opts;
+			wait_for = {};
+		}, job_types[typ](name, opts))
+	end
 
 	function x11.map(win)
-		print('map', win)
-		out_buffer[win].map = true
+		buffer('win:' .. win, 'win', {
+			win = win;
+			map = true;
+		})
 	end
 
 	function x11.unmap(win)
-		print('unmap', win)
-		out_buffer[win].map = false
+		buffer('win:' .. win  .. ':map', 'win', {
+			win = win;
+			map = false;
+		})
 	end
 
 	function x11.reparent(win, parent, x, y)
-		print('repar', win, parent)
-		local out = out_buffer[win]
-		out.wait_for[parent] = true
-		out.reparent = {
-			parent = parent;
-			x = x or 0;
-			y = y or 0;
-		}
+		buffer('win:' .. win, 'win', {
+			win = win;
+			reparent = {
+				parent = parent;
+				x = x or 0;
+				y = y or 0;
+			};
+		})
 	end
 
 	function x11.configure_window(win, opts)
-		print('configure', win)
-		local out_opts = out_buffer[win].configure
-		for k, v in pairs(opts) do
-			out_opts[k] = v
-		end
+		buffer('win:' .. win, 'win', {
+			win = win;
+			configure = opts;
+		})
 	end
 
 	function x11.move(win, x, y, width, height)
@@ -396,45 +499,43 @@ do
 		})
 	end
 
-	local cwa = {
-		{'back_pixmap', xcb.XCB_CW_BACK_PIXMAP, 'xcb_pixmap_t'};
-		{'back_pixel', xcb.XCB_CW_BACK_PIXEL, 'uint32_t'};
-		{'border_pixmap', xcb.XCB_CW_BORDER_PIXMAP, 'xcb_pixmap_t'};
-		{'border_pixel', xcb.XCB_CW_BORDER_PIXEL, 'uint32_t'};
-		{'bit_gravity', xcb.XCB_CW_BIT_GRAVITY, 'uint32_t'};
-		{'win_gravity', xcb.XCB_CW_WIN_GRAVITY, 'uint32_t'};
-		{'backing_stores', xcb.XCB_CW_BACKING_STORE, 'uint32_t'};
-		{'backing_planes', xcb.XCB_CW_BACKING_PLANES, 'uint32_t'};
-		{'backing_pixel', xcb.XCB_CW_BACKING_PIXEL, 'uint32_t'};
-		{'override_redirect', xcb.XCB_CW_OVERRIDE_REDIRECT, 'uint32_t'};
-		{'save_under', xcb.XCB_CW_SAVE_UNDER, 'uint32_t'};
-		{'event_mask', xcb.XCB_CW_EVENT_MASK, 'uint32_t'};
-		{'dont_propogate', xcb.XCB_CW_DONT_PROPAGATE, 'uint32_t'};
-		{'colormap', xcb.XCB_CW_COLORMAP, 'xcb_colormap_t'};
-		{'cursor', xcb.XCB_CW_CURSOR, 'xcb_cursor_t'};
-	}
-
-	local cw = {
-		{'x', xcb.XCB_CONFIG_WINDOW_X, 'int32_t'};
-		{'y', xcb.XCB_CONFIG_WINDOW_Y, 'int32_t'};
-		{'width', xcb.XCB_CONFIG_WINDOW_WIDTH, 'uint32_t'};
-		{'height', xcb.XCB_CONFIG_WINDOW_HEIGHT, 'uint32_t'};
-		{'border_width', xcb.XCB_CONFIG_WINDOW_BORDER_WIDTH, 'uint32_t'};
-		{'sibling', xcb.XCB_CONFIG_WINDOW_SIBLING, 'xcb_window_t'};
-		{'stack_mode', xcb.XCB_CONFIG_WINDOW_STACK_MODE, 'uint32_t'};
-	}
-
 	function x11.change_window_attributes(win, attrs)
-		print('chg attrs', win)
-		local out_attrs = out_buffer[win].attributes
-		for k, v in pairs(attrs) do
-			out_attrs[k] = v
-		end
+		buffer('win:' .. win, 'win', {
+			win = win;
+			attrs = attrs;
+		})
 	end
 
 	function x11.destroy_window(win)
-		print('destroy', win)
-		out_buffer[win].destroy = true
+		buffer('win:' .. win, 'win', {
+			win = win;
+			destroy = true;
+		})
+	end
+
+	function job_types.focus(name, opts)
+		local old = out_buffer[name]
+		if old then
+			old = old.opts
+		else
+			old = {}
+		end
+		opts = xtend.deep(old, opts)
+		local win = opts.win
+		return {
+			fn = function()
+				xcb.xcb_set_input_focus(conn, opts.revert_to, opts.win, x11.time or xcb.XCB_TIME_CURRENT_TIME)
+			end;
+			wait_for = { ['win:' .. opts.win] = true; };
+			opts = opts;
+		}
+	end
+
+	function x11.focus(win, revert_to)
+		buffer('focus', 'focus', {
+			win = win;
+			revert_to = revert_to or xcb.XCB_INPUT_FOCUS_NONE;
+		})
 	end
 
 	function x11.flush_buffer(ord)
@@ -449,7 +550,7 @@ do
 			repeat
 				local win = table.remove(ord, 1)
 
-				local out = rawget(out_buffer, win)
+				local out = out_buffer[win]
 
 				if not out then
 					break
@@ -469,56 +570,7 @@ do
 					end
 				end
 
-				if out.destroy then
-					xcb.xcb_destroy_window(conn, win)
-					out_buffer[win] = nil
-					break
-				end
-
-				if out.map == false then
-					xcb.xcb_unmap_window(conn, win)
-				end
-				do
-					local repar = out.reparent
-					if repar then
-						xcb.xcb_reparent_window(conn, win, repar.parent, repar.x, repar.y)
-					end
-				end
-				if out.map == true then
-					xcb.xcb_map_window(conn, win)
-				end
-				do
-					local attrs = out.attributes
-					local mask = 0
-					local values = ffi.new('int32_t[15]')
-					local i = 0
-					for _, attr in ipairs(cwa) do
-						if attrs[attr[1]] then
-							mask = bit.bor(mask, attr[2])
-							values[i] = ffi.cast(attr[3], attrs[attr[1]])
-							i = i + 1
-						end
-					end
-					if mask ~= 0 then
-						xcb.xcb_change_window_attributes(conn, win, mask, values)
-					end
-				end
-				do
-					local configs = out.configure
-					local mask = 0
-					local values = ffi.new('int32_t[15]')
-					local i = 0
-					for _, config in ipairs(cw) do
-						if configs[config[1]] then
-							mask = bit.bor(mask, config[2])
-							values[i] = ffi.cast(config[3], configs[config[1]])
-							i = i + 1
-						end
-					end
-					if mask ~= 0 then
-						xcb.xcb_configure_window(conn, win, mask, values)
-					end
-				end
+				out.fn()
 
 				out_buffer[win] = nil
 			until true
@@ -535,7 +587,7 @@ do
 	end})
 
 	function x11.get_window_attributes(win)
-		x11.flush_buffer({win})
+		x11.flush_buffer({'win:' .. win})
 		local cookie = xcb.xcb_get_window_attributes_unchecked(conn, win)
 		return function()
 			local reply = xcb.xcb_get_window_attributes_reply(conn, cookie, nil)
@@ -544,7 +596,7 @@ do
 	end
 
 	function x11.get_geometry(win)
-		x11.flush_buffer({win})
+		x11.flush_buffer({'win:' .. win})
 		local cookie = xcb.xcb_get_geometry_unchecked(conn, win)
 		return function()
 			local reply = xcb.xcb_get_geometry_reply(conn, cookie, nil)
@@ -553,7 +605,7 @@ do
 	end
 
 	function x11.get_property(win, prop, length)
-		x11.flush_buffer({win})
+		x11.flush_buffer({'win:' .. win})
 		local cookie = xcb.xcb_get_property(conn, 0, win, prop, xcb.XCB_GET_PROPERTY_TYPE_ANY, 0, length)
 		return function()
 			local reply = xcb.xcb_get_property_reply(conn, cookie, nil)
