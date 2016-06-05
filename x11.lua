@@ -124,221 +124,6 @@ function x11.xinerama_screens()
 end
 
 do
-	local out_buffer
-	local function reset()
-		out_buffer = setmetatable({}, { __index = function(out_buffer, win)
-			local out = {
-				map = nil; -- true for map, false for unmap
-				reparent = nil; -- {parent=, x=, y=}
-				destroy = nil;
-				configure = {};
-				attributes = {};
-				wait_for = {};
-			}
-
-			out_buffer[win] = out
-
-			return out
-		end })
-	end
-	reset()
-
-	function x11.map(win)
-		print('map', win)
-		out_buffer[win].map = true
-	end
-
-	function x11.unmap(win)
-		print('unmap', win)
-		out_buffer[win].map = false
-	end
-
-	function x11.reparent(win, parent, x, y)
-		print('repar', win, parent)
-		local out = out_buffer[win]
-		out.wait_for[parent] = true
-		out.reparent = {
-			parent = parent;
-			x = x or 0;
-			y = y or 0;
-		}
-	end
-
-	function x11.configure_window(win, opts)
-		print('configure', win)
-		local out_opts = out_buffer[win].configure
-		for k, v in pairs(opts) do
-			out_opts[k] = v
-		end
-	end
-
-	function x11.move(win, x, y, width, height)
-		-- TODO: remove
-		x11.configure_window(win, {
-			x = x; y = y;
-			width = width; height = height;
-		})
-	end
-
-	local cwa = {
-		{'back_pixmap', xcb.XCB_CW_BACK_PIXMAP, 'xcb_pixmap_t'};
-		{'back_pixel', xcb.XCB_CW_BACK_PIXEL, 'uint32_t'};
-		{'border_pixmap', xcb.XCB_CW_BORDER_PIXMAP, 'xcb_pixmap_t'};
-		{'border_pixel', xcb.XCB_CW_BORDER_PIXEL, 'uint32_t'};
-		{'bit_gravity', xcb.XCB_CW_BIT_GRAVITY, 'uint32_t'};
-		{'win_gravity', xcb.XCB_CW_WIN_GRAVITY, 'uint32_t'};
-		{'backing_stores', xcb.XCB_CW_BACKING_STORE, 'uint32_t'};
-		{'backing_planes', xcb.XCB_CW_BACKING_PLANES, 'uint32_t'};
-		{'backing_pixel', xcb.XCB_CW_BACKING_PIXEL, 'uint32_t'};
-		{'override_redirect', xcb.XCB_CW_OVERRIDE_REDIRECT, 'uint32_t'};
-		{'save_under', xcb.XCB_CW_SAVE_UNDER, 'uint32_t'};
-		{'event_mask', xcb.XCB_CW_EVENT_MASK, 'uint32_t'};
-		{'dont_propogate', xcb.XCB_CW_DONT_PROPAGATE, 'uint32_t'};
-		{'colormap', xcb.XCB_CW_COLORMAP, 'xcb_colormap_t'};
-		{'cursor', xcb.XCB_CW_CURSOR, 'xcb_cursor_t'};
-	}
-
-	local cw = {
-		{'x', xcb.XCB_CONFIG_WINDOW_X, 'int32_t'};
-		{'y', xcb.XCB_CONFIG_WINDOW_Y, 'int32_t'};
-		{'width', xcb.XCB_CONFIG_WINDOW_WIDTH, 'uint32_t'};
-		{'height', xcb.XCB_CONFIG_WINDOW_HEIGHT, 'uint32_t'};
-		{'border_width', xcb.XCB_CONFIG_WINDOW_BORDER_WIDTH, 'uint32_t'};
-		{'sibling', xcb.XCB_CONFIG_WINDOW_SIBLING, 'xcb_window_t'};
-		{'stack_mode', xcb.XCB_CONFIG_WINDOW_STACK_MODE, 'uint32_t'};
-	}
-
-	function x11.change_window_attributes(win, attrs)
-		print('chg attrs', win)
-		local out_attrs = out_buffer[win].attributes
-		for k, v in pairs(attrs) do
-			out_attrs[k] = v
-		end
-	end
-
-	function x11.destroy_window(win)
-		print('destroy', win)
-		out_buffer[win].destroy = true
-	end
-
-	function x11.flush_buffer(ord)
-		if not ord then
-			ord = {}
-			for win, out in pairs(out_buffer) do
-				ord[#ord + 1] = win
-			end
-		end
-		while #ord > 0 do
-			repeat
-				local win = table.remove(ord, 1)
-
-				local out = rawget(out_buffer, win)
-
-				if not out then
-					break
-				end
-
-				do
-					local stop = false
-					for dep in pairs(out.wait_for) do
-						if rawget(out_buffer, dep) then
-							ord[#ord + 1] = dep
-							stop = true
-						end
-					end
-					if stop then
-						ord[#ord + 1] = win
-						break
-					end
-				end
-
-				if out.map == false then
-					xcb.xcb_unmap_window(conn, win)
-				end
-				do
-					local repar = out.reparent
-					if repar then
-						xcb.xcb_reparent_window(conn, win, repar.parent, repar.x, repar.y)
-					end
-				end
-				if out.map == true then
-					xcb.xcb_map_window(conn, win)
-				end
-				do
-					local attrs = out.attributes
-					local mask = 0
-					local values = ffi.new('int32_t[15]')
-					local i = 0
-					for _, attr in ipairs(cwa) do
-						if attrs[attr[1]] then
-							mask = bit.bor(mask, attr[2])
-							values[i] = ffi.cast(attr[3], attrs[attr[1]])
-							i = i + 1
-						end
-					end
-					if mask ~= 0 then
-						xcb.xcb_change_window_attributes(conn, win, mask, values)
-					end
-				end
-				do
-					local configs = out.configure
-					local mask = 0
-					local values = ffi.new('int32_t[15]')
-					local i = 0
-					for _, config in ipairs(cw) do
-						if configs[config[1]] then
-							mask = bit.bor(mask, config[2])
-							values[i] = ffi.cast(config[3], configs[config[1]])
-							i = i + 1
-						end
-					end
-					if mask ~= 0 then
-						xcb.xcb_configure_window(conn, win, mask, values)
-					end
-				end
-
-				out_buffer[win] = nil
-			until true
-		end
-		x11.flush()
-	end
-
-	table.insert(x11.tick_tasks, 1, {'x11 out_buffer output', function()
-		x11.flush_buffer()
-	end})
-
-	function x11.get_window_attributes(win)
-		x11.flush_buffer({win})
-		local cookie = xcb.xcb_get_window_attributes_unchecked(conn, win)
-		return function()
-			local reply = xcb.xcb_get_window_attributes_reply(conn, cookie, nil)
-			return reply
-		end
-	end
-
-	function x11.get_geometry(win)
-		x11.flush_buffer({win})
-		local cookie = xcb.xcb_get_geometry_unchecked(conn, win)
-		return function()
-			local reply = xcb.xcb_get_geometry_reply(conn, cookie, nil)
-			return reply
-		end
-	end
-
-	function x11.get_property(win, prop, length)
-		x11.flush_buffer({win})
-		local cookie = xcb.xcb_get_property(conn, 0, win, prop, xcb.XCB_GET_PROPERTY_TYPE_ANY, 0, length)
-		return function()
-			local reply = xcb.xcb_get_property_reply(conn, cookie, nil)
-			return {
-				ptr = xcb.xcb_get_property_value(reply);
-				len = xcb.xcb_get_property_value_length(reply);
-			}
-		end
-	end
-end
-
-do
 	local gc_attrs = {
 		{'function', xcb.XCB_GC_FUNCTION, 'uint32_t'};
 		{'plane_mask', xcb.XCB_GC_PLANE_MASK, 'uint32_t'};
@@ -456,7 +241,7 @@ x11.tick_tasks[#x11.tick_tasks + 1] = {'x11 poll', function()
 
 		if name then
 			ev = ffi.cast(name[2] or ('xcb_' .. name[1] .. '_event_t*'), ev)
-			-- print('  known event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
+			print('  known event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
 			emit(name[1], ev)
 		else
 			print('unknown event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
@@ -553,5 +338,231 @@ uv.prepare_start(xcb_prepare, function()
 		task[2]()
 	end
 end)
+
+do
+	local out_buffer
+	local function reset()
+		out_buffer = setmetatable({}, { __index = function(out_buffer, win)
+			local out = {
+				map = nil; -- true for map, false for unmap
+				reparent = nil; -- {parent=, x=, y=}
+				destroy = nil;
+				configure = {};
+				attributes = {};
+				wait_for = {};
+			}
+
+			out_buffer[win] = out
+
+			return out
+		end })
+	end
+	reset()
+
+	function x11.map(win)
+		print('map', win)
+		out_buffer[win].map = true
+	end
+
+	function x11.unmap(win)
+		print('unmap', win)
+		out_buffer[win].map = false
+	end
+
+	function x11.reparent(win, parent, x, y)
+		print('repar', win, parent)
+		local out = out_buffer[win]
+		out.wait_for[parent] = true
+		out.reparent = {
+			parent = parent;
+			x = x or 0;
+			y = y or 0;
+		}
+	end
+
+	function x11.configure_window(win, opts)
+		print('configure', win)
+		local out_opts = out_buffer[win].configure
+		for k, v in pairs(opts) do
+			out_opts[k] = v
+		end
+	end
+
+	function x11.move(win, x, y, width, height)
+		-- TODO: remove
+		x11.configure_window(win, {
+			x = x; y = y;
+			width = width; height = height;
+		})
+	end
+
+	local cwa = {
+		{'back_pixmap', xcb.XCB_CW_BACK_PIXMAP, 'xcb_pixmap_t'};
+		{'back_pixel', xcb.XCB_CW_BACK_PIXEL, 'uint32_t'};
+		{'border_pixmap', xcb.XCB_CW_BORDER_PIXMAP, 'xcb_pixmap_t'};
+		{'border_pixel', xcb.XCB_CW_BORDER_PIXEL, 'uint32_t'};
+		{'bit_gravity', xcb.XCB_CW_BIT_GRAVITY, 'uint32_t'};
+		{'win_gravity', xcb.XCB_CW_WIN_GRAVITY, 'uint32_t'};
+		{'backing_stores', xcb.XCB_CW_BACKING_STORE, 'uint32_t'};
+		{'backing_planes', xcb.XCB_CW_BACKING_PLANES, 'uint32_t'};
+		{'backing_pixel', xcb.XCB_CW_BACKING_PIXEL, 'uint32_t'};
+		{'override_redirect', xcb.XCB_CW_OVERRIDE_REDIRECT, 'uint32_t'};
+		{'save_under', xcb.XCB_CW_SAVE_UNDER, 'uint32_t'};
+		{'event_mask', xcb.XCB_CW_EVENT_MASK, 'uint32_t'};
+		{'dont_propogate', xcb.XCB_CW_DONT_PROPAGATE, 'uint32_t'};
+		{'colormap', xcb.XCB_CW_COLORMAP, 'xcb_colormap_t'};
+		{'cursor', xcb.XCB_CW_CURSOR, 'xcb_cursor_t'};
+	}
+
+	local cw = {
+		{'x', xcb.XCB_CONFIG_WINDOW_X, 'int32_t'};
+		{'y', xcb.XCB_CONFIG_WINDOW_Y, 'int32_t'};
+		{'width', xcb.XCB_CONFIG_WINDOW_WIDTH, 'uint32_t'};
+		{'height', xcb.XCB_CONFIG_WINDOW_HEIGHT, 'uint32_t'};
+		{'border_width', xcb.XCB_CONFIG_WINDOW_BORDER_WIDTH, 'uint32_t'};
+		{'sibling', xcb.XCB_CONFIG_WINDOW_SIBLING, 'xcb_window_t'};
+		{'stack_mode', xcb.XCB_CONFIG_WINDOW_STACK_MODE, 'uint32_t'};
+	}
+
+	function x11.change_window_attributes(win, attrs)
+		print('chg attrs', win)
+		local out_attrs = out_buffer[win].attributes
+		for k, v in pairs(attrs) do
+			out_attrs[k] = v
+		end
+	end
+
+	function x11.destroy_window(win)
+		print('destroy', win)
+		out_buffer[win].destroy = true
+	end
+
+	function x11.flush_buffer(ord)
+		print('flush', ord and table.concat(ord, ', ') or 'all')
+		if not ord then
+			ord = {}
+			for win, out in pairs(out_buffer) do
+				ord[#ord + 1] = win
+			end
+		end
+		while #ord > 0 do
+			repeat
+				local win = table.remove(ord, 1)
+
+				local out = rawget(out_buffer, win)
+
+				if not out then
+					break
+				end
+
+				do
+					local stop = false
+					for dep in pairs(out.wait_for) do
+						if rawget(out_buffer, dep) then
+							ord[#ord + 1] = dep
+							stop = true
+						end
+					end
+					if stop then
+						ord[#ord + 1] = win
+						break
+					end
+				end
+
+				if out.destroy then
+					xcb.xcb_destroy_window(conn, win)
+					out_buffer[win] = nil
+					break
+				end
+
+				if out.map == false then
+					xcb.xcb_unmap_window(conn, win)
+				end
+				do
+					local repar = out.reparent
+					if repar then
+						xcb.xcb_reparent_window(conn, win, repar.parent, repar.x, repar.y)
+					end
+				end
+				if out.map == true then
+					xcb.xcb_map_window(conn, win)
+				end
+				do
+					local attrs = out.attributes
+					local mask = 0
+					local values = ffi.new('int32_t[15]')
+					local i = 0
+					for _, attr in ipairs(cwa) do
+						if attrs[attr[1]] then
+							mask = bit.bor(mask, attr[2])
+							values[i] = ffi.cast(attr[3], attrs[attr[1]])
+							i = i + 1
+						end
+					end
+					if mask ~= 0 then
+						xcb.xcb_change_window_attributes(conn, win, mask, values)
+					end
+				end
+				do
+					local configs = out.configure
+					local mask = 0
+					local values = ffi.new('int32_t[15]')
+					local i = 0
+					for _, config in ipairs(cw) do
+						if configs[config[1]] then
+							mask = bit.bor(mask, config[2])
+							values[i] = ffi.cast(config[3], configs[config[1]])
+							i = i + 1
+						end
+					end
+					if mask ~= 0 then
+						xcb.xcb_configure_window(conn, win, mask, values)
+					end
+				end
+
+				out_buffer[win] = nil
+			until true
+		end
+		x11.flush()
+	end
+
+	table.insert(x11.tick_tasks, 1, {'x11 out_buffer output pre', function()
+		x11.flush_buffer()
+	end})
+
+	table.insert(x11.tick_tasks, {'x11 out_buffer output post', function()
+		x11.flush_buffer()
+	end})
+
+	function x11.get_window_attributes(win)
+		x11.flush_buffer({win})
+		local cookie = xcb.xcb_get_window_attributes_unchecked(conn, win)
+		return function()
+			local reply = xcb.xcb_get_window_attributes_reply(conn, cookie, nil)
+			return reply
+		end
+	end
+
+	function x11.get_geometry(win)
+		x11.flush_buffer({win})
+		local cookie = xcb.xcb_get_geometry_unchecked(conn, win)
+		return function()
+			local reply = xcb.xcb_get_geometry_reply(conn, cookie, nil)
+			return reply
+		end
+	end
+
+	function x11.get_property(win, prop, length)
+		x11.flush_buffer({win})
+		local cookie = xcb.xcb_get_property(conn, 0, win, prop, xcb.XCB_GET_PROPERTY_TYPE_ANY, 0, length)
+		return function()
+			local reply = xcb.xcb_get_property_reply(conn, cookie, nil)
+			return {
+				ptr = xcb.xcb_get_property_value(reply);
+				len = xcb.xcb_get_property_value_length(reply);
+			}
+		end
+	end
+end
 
 return x11
