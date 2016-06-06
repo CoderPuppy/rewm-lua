@@ -81,9 +81,8 @@ x11.on('expose', function(ev)
 end)
 
 x11.on('property_notify', function(ev)
-	local reply = x11.xcb.xcb_get_atom_name_reply(x11.conn, x11.xcb.xcb_get_atom_name_unchecked(x11.conn, ev.atom), nil)
 	local clw = clws(ev.window, clws.dummy)
-	-- p('property_change', clw.type, ev.window, ffi.string(x11.xcb.xcb_get_atom_name_name(reply), x11.xcb.xcb_get_atom_name_name_length(reply)))
+	p('property_change', clw.type, ev.window, x11.A[ev.atom])
 	clw.property_change(ev)
 end)
 

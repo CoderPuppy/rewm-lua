@@ -369,6 +369,54 @@ function clws.tile(xclw)
 		x11.map(clw.xwin)
 	end
 
+	local function render()
+		-- if it doesn't have a parent then it's not mapped
+		if not tile.parent then return end
+
+		local colors_ = tiles.focused == tile and colors.focused or colors.unfocused
+		local rects = ffi.new('xcb_rectangle_t[1]')
+
+		if tile.internal_frame then
+			x11.change_gc(gc, {
+				foreground = colors_.border;
+				line_width = 2;
+			})
+			rects[0].x = 1
+			rects[0].y = 1
+			rects[0].width = tile.width - 2
+			rects[0].height = tile.height - 2
+			x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
+		end
+
+		if not tile.external_title then
+			x11.change_gc(gc, {
+				foreground = colors_.bg;
+			})
+			rects[0].x = 1
+			rects[0].y = 1
+			rects[0].width = tile.width - 2
+			rects[0].height = 16
+			x11.xcb.xcb_poly_fill_rectangle(x11.conn, tile.xwin, gc, 1, rects)
+
+			x11.change_gc(gc, {
+				foreground = colors_.border;
+				line_width = 1;
+			})
+			rects[0].x = 0
+			rects[0].y = 0
+			rects[0].width = tile.width - 1
+			rects[0].height = 17
+			x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
+
+			x11.change_gc(gc, {
+				font = font;
+				foreground = colors_.title;
+				background = colors_.bg;
+			})
+			x11.xcb.xcb_image_text_8(x11.conn, #tile.title, tile.xwin, gc, 5, 12, tile.title)
+		end
+	end
+
 	local function update_title()
 		local ascii_cookie = x11.get_property(clw.xwin, x11.xcb.XCB_ATOM_WM_NAME, 128)
 		local utf8_cookie = x11.get_property(clw.xwin, x11.A._NET_WM_NAME, 128)
@@ -380,6 +428,7 @@ function clws.tile(xclw)
 		tile.utf8_title = ffi.string(utf8_val.ptr, utf8_val.len)
 
 		tile.title = (tile.utf8_title or tile.ascii_title) .. ' (' .. tile.xwin .. ' ' .. clw.xwin .. ')'
+		render()
 	end
 
 	update_title()
@@ -437,51 +486,6 @@ function clws.tile(xclw)
 
 	function tile.add(new, dir)
 		tile.parent.add(new, 'up')
-	end
-
-	local function render()
-		local colors_ = tiles.focused == tile and colors.focused or colors.unfocused
-		local rects = ffi.new('xcb_rectangle_t[1]')
-
-		if tile.internal_frame then
-			x11.change_gc(gc, {
-				foreground = colors_.border;
-				line_width = 2;
-			})
-			rects[0].x = 1
-			rects[0].y = 1
-			rects[0].width = tile.width - 2
-			rects[0].height = tile.height - 2
-			x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
-		end
-
-		if not tile.external_title then
-			x11.change_gc(gc, {
-				foreground = colors_.bg;
-			})
-			rects[0].x = 1
-			rects[0].y = 1
-			rects[0].width = tile.width - 2
-			rects[0].height = 16
-			x11.xcb.xcb_poly_fill_rectangle(x11.conn, tile.xwin, gc, 1, rects)
-
-			x11.change_gc(gc, {
-				foreground = colors_.border;
-				line_width = 1;
-			})
-			rects[0].x = 0
-			rects[0].y = 0
-			rects[0].width = tile.width - 1
-			rects[0].height = 17
-			x11.xcb.xcb_poly_rectangle(x11.conn, tile.xwin, gc, 1, rects)
-
-			x11.change_gc(gc, {
-				font = font;
-				foreground = colors_.title;
-				background = colors_.bg;
-			})
-			x11.xcb.xcb_image_text_8(x11.conn, #tile.title, tile.xwin, gc, 5, 12, tile.title)
-		end
 	end
 
 	function tile.focus()

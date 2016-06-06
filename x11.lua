@@ -41,26 +41,115 @@ x11.conn = conn
 x11.setup = setup
 x11.screen = screen
 
+-- Atoms
 do
-	x11.A = {}
-	
-	for _, atom in ipairs({
-		'_NET_WM_NAME';
-	}) do
-		x11.A[atom] = xcb.xcb_intern_atom(conn, 0, #atom, atom)
+	x11.A = {
+		NONE = 0;
+		ANY = 0;
+		PRIMARY = 1;
+		SECONDARY = 2;
+		ARC = 3;
+		ATOM = 4;
+		BITMAP = 5;
+		CARDINAL = 6;
+		COLORMAP = 7;
+		CURSOR = 8;
+		CUT_BUFFER0 = 9;
+		CUT_BUFFER1 = 10;
+		CUT_BUFFER2 = 11;
+		CUT_BUFFER3 = 12;
+		CUT_BUFFER4 = 13;
+		CUT_BUFFER5 = 14;
+		CUT_BUFFER6 = 15;
+		CUT_BUFFER7 = 16;
+		DRAWABLE = 17;
+		FONT = 18;
+		INTEGER = 19;
+		PIXMAP = 20;
+		POINT = 21;
+		RECTANGLE = 22;
+		RESOURCE_MANAGER = 23;
+		RGB_COLOR_MAP = 24;
+		RGB_BEST_MAP = 25;
+		RGB_BLUE_MAP = 26;
+		RGB_DEFAULT_MAP = 27;
+		RGB_GRAY_MAP = 28;
+		RGB_GREEN_MAP = 29;
+		RGB_RED_MAP = 30;
+		STRING = 31;
+		VISUALID = 32;
+		WINDOW = 33;
+		WM_COMMAND = 34;
+		WM_HINTS = 35;
+		WM_CLIENT_MACHINE = 36;
+		WM_ICON_NAME = 37;
+		WM_ICON_SIZE = 38;
+		WM_NAME = 39;
+		WM_NORMAL_HINTS = 40;
+		WM_SIZE_HINTS = 41;
+		WM_ZOOM_HINTS = 42;
+		MIN_SPACE = 43;
+		NORM_SPACE = 44;
+		MAX_SPACE = 45;
+		END_SPACE = 46;
+		SUPERSCRIPT_X = 47;
+		SUPERSCRIPT_Y = 48;
+		SUBSCRIPT_X = 49;
+		SUBSCRIPT_Y = 50;
+		UNDERLINE_POSITION = 51;
+		UNDERLINE_THICKNESS = 52;
+		STRIKEOUT_ASCENT = 53;
+		STRIKEOUT_DESCENT = 54;
+		ITALIC_ANGLE = 55;
+		X_HEIGHT = 56;
+		QUAD_WIDTH = 57;
+		WEIGHT = 58;
+		POINT_SIZE = 59;
+		RESOLUTION = 60;
+		COPYRIGHT = 61;
+		NOTICE = 62;
+		FONT_NAME = 63;
+		FAMILY_NAME = 64;
+		FULL_NAME = 65;
+		CAP_HEIGHT = 66;
+		WM_CLASS = 67;
+		WM_TRANSIENT_FOR = 68;
+	}
+	for name, atom in pairs(x11.A) do
+		x11.A[atom] = name
 	end
-	for name, req in pairs(x11.A) do
-		x11.A[name] = xcb.xcb_intern_atom_reply(conn, req, nil).atom
+	x11.A[0] = nil
+	
+	do
+		local tmp = {}
+		for _, atom in ipairs({
+			'_NET_WM_NAME';
+		}) do
+			tmp[atom] = xcb.xcb_intern_atom(conn, 0, #atom, atom)
+		end
+		for name, req in pairs(tmp) do
+			x11.A[name] = xcb.xcb_intern_atom_reply(conn, req, nil).atom
+		end
 	end
 
-	setmetatable(x11.A, { __index = function(_, atom)
-		if type(atom) == 'string' then
-			p('interning atom', atom)
-			local atom = xcb.xcb_intern_atom_reply(conn, xcb.xcb_intern_atom(conn, 0, #atom, atom), nil).atom
+	setmetatable(x11.A, { __index = function(_, arg)
+		if type(arg) == 'string' then
+			local name = arg
+			name = name:upper()
+			local atom = rawget(x11.A, name)
+			if atom then
+				return atom
+			end
+			p('interning atom', name)
+			atom = xcb.xcb_intern_atom_reply(conn, xcb.xcb_intern_atom(conn, 0, #name, name), nil).atom
 			x11.A[name] = atom
 			x11.A[atom] = name
 			return atom
-		elseif type(atom) == 'number' then
+		elseif type(arg) == 'number' then
+			local atom = arg
+			if atom == 0 then
+				return nil
+			end
 			p('getting atom name', atom)
 			local reply = xcb.xcb_get_atom_name_reply(conn, xcb.xcb_get_atom_name(conn, atom), nil)
 			local name = ffi.string(
@@ -70,7 +159,7 @@ do
 			p('name', name)
 			x11.A[name] = atom
 			x11.A[atom] = name
-			return atom
+			return name
 		else
 			error('bad atom type: ' .. type(atom))
 		end
@@ -211,6 +300,7 @@ local event_types = {
 	DestroyNotify = {'destroy_notify'};
 	FocusIn = {'focus_in'};
 	ButtonPress = {'button_press'};
+	PropertyNotify = {'property_notify'};
 }
 
 local handlers = {}
@@ -548,7 +638,7 @@ do
 		function x11.change_window_attributes(win, attrs)
 			buffer('win:' .. win, 'win', {
 				win = win;
-				attrs = attrs;
+				attributes = attrs;
 			})
 		end
 
@@ -622,7 +712,7 @@ do
 	end
 
 	function x11.flush_buffer(ord)
-		p('flush', ord and table.concat(ord, ', ') or 'all')
+		p('flush', ord and table.concat(ord, ', ') or '*')
 		if not ord then
 			ord = {}
 			for win, out in pairs(out_buffer) do
