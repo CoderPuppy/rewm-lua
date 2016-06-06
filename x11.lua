@@ -226,7 +226,8 @@ uv.poll_start(xcb_poll, 'r', function(err, events)
 end)
 
 x11.tick_tasks[#x11.tick_tasks + 1] = {'x11 poll', function()
-	print('poll')
+	x11.time = xcb.XCB_TIME_CURRENT_TIME
+	p('poll')
 	x11.flush()
 
 	local unmaps = {}
@@ -243,15 +244,30 @@ x11.tick_tasks[#x11.tick_tasks + 1] = {'x11 poll', function()
 
 		if name then
 			ev = ffi.cast(name[2] or ('xcb_' .. name[1] .. '_event_t*'), ev)
-			print('  known event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
+			p('  known event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
 			emit(name[1], ev)
 		else
-			print('unknown event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
+			p('unknown event: ' .. tostring(typ) .. ' (' .. tostring(ev.response_type) .. ')')
 		end
 	end
 
 	x11.flush()
 end}
+
+for _, name in ipairs({
+	'key_press';
+	'button_press';
+	'motion_notify';
+	'enter_notify';
+	'property_notify';
+	'selection_clear';
+	'selection_request';
+	'selection_notify';
+}) do
+	x11.on(name, function(ev)
+		x11.time = ev.time
+	end)
+end
 
 do
 	local state
@@ -450,7 +466,7 @@ do
 		if not job_types[typ] then
 			error('unknown job type: ' .. tostring(typ))
 		end
-		print('buffer', name)
+		p('buffer', name)
 		out_buffer[name] = xtend({
 			name = name;
 			typ = typ;
@@ -521,7 +537,6 @@ do
 			old = {}
 		end
 		opts = xtend.deep(old, opts)
-		local win = opts.win
 		return {
 			fn = function()
 				xcb.xcb_set_input_focus(conn, opts.revert_to, opts.win, x11.time or xcb.XCB_TIME_CURRENT_TIME)
@@ -539,7 +554,7 @@ do
 	end
 
 	function x11.flush_buffer(ord)
-		print('flush', ord and table.concat(ord, ', ') or 'all')
+		p('flush', ord and table.concat(ord, ', ') or 'all')
 		if not ord then
 			ord = {}
 			for win, out in pairs(out_buffer) do

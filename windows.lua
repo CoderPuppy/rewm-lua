@@ -102,7 +102,7 @@ local Tile; Tile = {
 		end
 	end;
 	move_update = function(tile, move)
-		print('move', tile.xwin, move.parent.xwin, move.x, move.y, move.width, move.height)
+		p('move', tile.xwin, move.parent.xwin, move.x, move.y, move.width, move.height)
 		tile.parent = move.parent
 		tile.x = move.x
 		tile.y = move.y
@@ -114,9 +114,30 @@ local Tile; Tile = {
 		x11.move(tile.xwin, tile.x, tile.y, tile.width, tile.height)
 	end;
 
+	off_unmap = function(tile)
+		x11.unmap(tile.xwin)
+	end;
+	off_unparent = function(tile)
+		tile.parent = nil
+	end;
+
+	required = {
+		put_under = 'function';
+		removed_from = 'function';
+
+		add = 'function';
+
+		move = 'function';
+		off = 'function';
+
+		focus = 'function';
+		defocus = 'function';
+	};
+
 	optional = {
 		put_under = function() end;
 		removed_from = function() end;
+		off = function() end;
 	};
 
 	hooks = {
@@ -139,6 +160,14 @@ local Tile; Tile = {
 				Tile.move_map(tile, ...)
 				Tile.move_update(tile, ...)
 				Tile.move_xwin(tile, ...)
+				return f(...)
+			end
+		end;
+
+		off = function(tile, f)
+			return function(...)
+				Tile.off_unmap(tile, ...)
+				Tile.off_unparent(tile, ...)
 				return f(...)
 			end
 		end;
@@ -187,6 +216,14 @@ setmetatable(Tile, { __call = function(_, tile)
 		if type(v) == 'function' and Tile.hooks[k] then
 			old[k] = v
 			tile[k] = Tile.hooks[k](tile, old[k])
+		end
+	end
+
+	for name, typ in pairs(Tile.required) do
+		if not tile[name] then
+			error('missing: ' .. tile.type .. '.' .. name)
+		elseif type(tile[name]) ~= typ then
+			error('bad type: ' .. tile.type .. '.' .. name .. ': expected ' .. typ .. ' got ' .. type(tile[name]))
 		end
 	end
 
@@ -240,7 +277,7 @@ function clws.tile(xclw)
 		local values = ffi.new('int32_t[3]',
 			1,
 			bit.bor(unpack({ 0;
-				-- x11.xcb.XCB_EVENT_MASK_BUTTON_PRESS;
+				x11.xcb.XCB_EVENT_MASK_BUTTON_PRESS;
 				-- x11.xcb.XCB_EVENT_MASK_BUTTON_RELEASE;
 				-- x11.xcb.XCB_EVENT_MASK_POINTER_MOTION;
 				x11.xcb.XCB_EVENT_MASK_EXPOSURE;
@@ -346,13 +383,12 @@ function clws.tile(xclw)
 		x11.move(clw.xwin, x, y, width, height)
 	end
 
-	function tile.off()
-		x11.unmap(tile.xwin)
-		tile.parent = nil
-	end
-
 	function tile.add(new, dir)
 		tile.parent.add(new, 'up')
+	end
+
+	function tile.focus()
+		x11.set_input_focus
 	end
 
 	function tile.as_clw.expose(ev)
@@ -562,7 +598,7 @@ do
 			root.child.add(new, dir)
 		else
 			if root.child then
-				print('splitting root')
+				p('splitting root')
 
 				local prev = root.child
 				local split = tiles.hsplit()
@@ -603,14 +639,19 @@ end
 
 tiles.focused = root
 
-function tiles.add(tile)
-	print(tiles.focused.type)
-	tiles.focused.add(tile, 'down')
+function tiles.focus(tile)
 	tiles.focused = tile
+	tile.focus()
+end
+
+function tiles.add(tile)
+	p(tiles.focused.type)
+	tiles.focused.add(tile, 'down')
+	tiles.focus(tile)
 end
 
 function tiles.replace(prev, new)
-	print('TODO', 'tiles.replace')
+	p('TODO', 'tiles.replace')
 end
 
 function tiles.remove(tile)
