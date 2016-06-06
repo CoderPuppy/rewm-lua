@@ -4,7 +4,7 @@ local uv = require 'luv'
 
 _G.i = pl.pretty.write
 function _G.p(...)
-	io.stderr:write(table.concat({...}, '\t') .. '\n')
+	io.stderr:write(table.concat(pl.seq({...}):map(tostring):copy(), '\t') .. '\n')
 end
 
 local x11 = require 'x11'
@@ -12,8 +12,8 @@ local clws, tiles = table.unpack(require 'windows')
 
 local A = x11.A
 
-p(i(x11.randr_outputs()))
-p(i(x11.xinerama_screens()))
+p('randr', i(x11.randr_outputs()))
+p('xinerama', i(x11.xinerama_screens()))
 
 -- Listen for events on root window
 do
@@ -53,6 +53,11 @@ x11.on('map_notify', function(ev)
 	clw.mapped(ev)
 end)
 
+x11.on('unmap_notify', function(ev)
+	-- no this really shouldn't call anything
+	p('unmap notify', clws(ev.window, clws.dummy).type, ev.window)
+end)
+
 x11.on('smooth:unmap_notify', function(ev)
 	local clw = clws(ev.window, clws.dummy)
 	-- p('unmap notify', clw.type, ev.window)
@@ -83,7 +88,8 @@ x11.on('property_notify', function(ev)
 end)
 
 x11.on('focus_in', function(ev)
-	local clw = clws(ev.event, clws.dummy)
+	local rpl = x11.xcb.xcb_get_input_focus_reply(x11.conn, x11.xcb.xcb_get_input_focus(x11.conn), nil)
+	local clw = clws(rpl.focus, clws.dummy)
 	-- p('focus in', clw.type, ev.event)
 	clw.focus_in(ev)
 end)
@@ -94,16 +100,10 @@ x11.on('focus_out', function(ev)
 	clw.focus_out(ev)
 end)
 
-uv.signal_start(uv.new_signal(), 'sigint', function()
-	p('sigint')
-	for _, tile in pairs(tiles.cache) do
-		if tile.type == 'clw' then
-			x11.reparent(tile.clw.xwin, x11.screen.root)
-			x11.flush_buffer()
-			x11.xcb_util.xcb_aux_sync(x11.conn)
-		end
-	end
-	uv.stop()
+x11.on('button_press', function(ev)
+	local clw = clws(ev.event, clws.dummy)
+	p('button press', ev.event, clw.type, ev.child, ev.root)
+	clw.button_press(ev)
 end)
 
 require './uv-repl'

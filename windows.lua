@@ -3,6 +3,7 @@ local ffi = require 'ffi'
 local uv = require 'luv'
 
 local x11 = require 'x11'
+local xtend = require 'xtend'
 
 local gc
 do
@@ -17,6 +18,39 @@ do
 	-- local name = '-*-*-*-*-*-*-16-*-*-*-*-*-iso10646-1'
 	local name = 'fixed'
 	x11.xcb.xcb_open_font(x11.conn, font, #name, name)
+end
+
+local colors = {
+	unfocused = {
+		border = 0x333333;
+		bg = 0x1F1F1F;
+		title = 0xC0B18B;
+	};
+
+	focused = {
+		border = 0x5A3637;
+		bg = 0x2F1F1F;
+		title = 0xEDEDED;
+	};
+}
+do
+	colors = xtend.deep_map(colors, function(path, v)
+		return x11.xcb.xcb_alloc_color(x11.conn,
+			x11.screen.default_colormap, -- colormap
+			bit.band(0xFF, bit.rshift(v, 16)) * 256, -- red
+			bit.band(0xFF, bit.rshift(v,  8)) * 256, -- green
+			bit.band(0xFF, bit.rshift(v,  0)) * 256  -- blue
+		)
+	end)
+	local err = ffi.new('xcb_generic_error_t*[1]')
+	colors = xtend.deep_map(colors, function(path, v)
+		local res = x11.xcb.xcb_alloc_color_reply(x11.conn, v, err)
+		if res == nil then
+			x11.error(err[1])
+			return
+		end
+		return res.pixel
+	end)
 end
 
 local tiles = {
@@ -71,6 +105,7 @@ local function ClW(clw)
 		'property_change';
 		'focus_in';
 		'focus_out';
+		'button_press';
 	}) do
 		if clw[name] == nil then
 			clw[name] = function(ev) end
@@ -111,7 +146,7 @@ local Tile; Tile = {
 		tile.external_title = move.external_title
 	end;
 	move_xwin = function(tile, move)
-		x11.move(tile.xwin, tile.x, tile.y, tile.width, tile.height)
+		x11.move(tile.xwin, move.x, move.y, move.width, move.height)
 	end;
 
 	off_unmap = function(tile)
@@ -138,6 +173,7 @@ local Tile; Tile = {
 		put_under = function() end;
 		removed_from = function() end;
 		off = function() end;
+		defocus = function() end;
 	};
 
 	hooks = {
@@ -314,6 +350,17 @@ function clws.tile(xclw)
 				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
 			}));
 		})
+		x11.xcb.xcb_grab_button(x11.conn,
+			false, -- whether the window gets events
+			clw.xwin, -- window
+			x11.xcb.XCB_EVENT_MASK_BUTTON_PRESS, -- event mask
+			x11.xcb.XCB_GRAB_MODE_SYNC, -- pointer grab mode
+			x11.xcb.XCB_GRAB_MODE_ASYNC, -- keyboard grab mode
+			x11.screen.root, -- constraint to window
+			0, -- cursor: XCB_NONE (don't change)
+			1, -- button
+			x11.xcb.XCB_MOD_MASK_ANY -- modifiers
+		)
 	end
 
 	-- Move clw window under frame window
@@ -367,6 +414,11 @@ function clws.tile(xclw)
 		destroy_tile(tile)
 	end
 
+	function clw.button_press(ev)
+		x11.xcb.xcb_allow_events(x11.conn, x11.xcb.XCB_ALLOW_REPLAY_POINTER, ev.time)
+		tiles.focus(tile)
+	end
+
 	-- TODO: pull out duplicate code
 
 	function tile.move(move)
@@ -387,16 +439,13 @@ function clws.tile(xclw)
 		tile.parent.add(new, 'up')
 	end
 
-	function tile.focus()
-		x11.set_input_focus
-	end
-
-	function tile.as_clw.expose(ev)
+	local function render()
+		local colors_ = tiles.focused == tile and colors.focused or colors.unfocused
 		local rects = ffi.new('xcb_rectangle_t[1]')
 
 		if tile.internal_frame then
 			x11.change_gc(gc, {
-				foreground = x11.screen.white_pixel;
+				foreground = colors_.border;
 				line_width = 2;
 			})
 			rects[0].x = 1
@@ -408,7 +457,7 @@ function clws.tile(xclw)
 
 		if not tile.external_title then
 			x11.change_gc(gc, {
-				foreground = x11.screen.black_pixel;
+				foreground = colors_.bg;
 			})
 			rects[0].x = 1
 			rects[0].y = 1
@@ -417,7 +466,7 @@ function clws.tile(xclw)
 			x11.xcb.xcb_poly_fill_rectangle(x11.conn, tile.xwin, gc, 1, rects)
 
 			x11.change_gc(gc, {
-				foreground = x11.screen.white_pixel;
+				foreground = colors_.border;
 				line_width = 1;
 			})
 			rects[0].x = 0
@@ -428,11 +477,28 @@ function clws.tile(xclw)
 
 			x11.change_gc(gc, {
 				font = font;
-				foreground = x11.screen.white_pixel;
-				background = x11.screen.black_pixel;
+				foreground = colors_.title;
+				background = colors_.bg;
 			})
 			x11.xcb.xcb_image_text_8(x11.conn, #tile.title, tile.xwin, gc, 5, 12, tile.title)
 		end
+	end
+
+	function tile.focus()
+		x11.focus(clw.xwin)
+		render()
+	end
+
+	function tile.defocus()
+		render()
+	end
+
+	function tile.as_clw.expose(ev)
+		render()
+	end
+
+	function tile.as_clw.button_press(ev)
+		tiles.focus(tile)
 	end
 
 	Tile(tile)
@@ -500,6 +566,41 @@ function tiles.hsplit()
 			),
 			values -- values
 		)
+	end
+
+	-- Create input window
+	do
+		tile.input_clw = {
+			type = 'hsplit.input_clw';
+		}
+		tile.input_clw.xwin = x11.xcb.xcb_generate_id(x11.conn)
+		local values = ffi.new('int32_t[2]',
+			1,
+			bit.bor(unpack({ 0;
+				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
+			}))
+		)
+		x11.xcb.xcb_create_window(x11.conn,
+			0, -- depth: copy from parent
+			tile.input_clw.xwin, -- window
+			tile.xwin, -- parent
+			0, 0, -- x, y
+			1, 1, -- width, height
+			0, -- border width
+			x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
+			x11.screen.root_visual, -- visual
+			bit.bor( -- values mask
+				x11.xcb.XCB_CW_OVERRIDE_REDIRECT,
+				x11.xcb.XCB_CW_EVENT_MASK
+			),
+			values -- values
+		)
+		x11.map(tile.input_clw.xwin)
+		ClW(tile.input_clw)
+	end
+
+	function tile.focus()
+		x11.focus(tile.input_clw.xwin, x11.xcb.XCB_INPUT_FOCUS_NONE)
 	end
 
 	local function split_move(child, x, width)
@@ -578,6 +679,7 @@ function tiles.hsplit()
 	return tile
 end
 
+-- TODO: create a root for each randr output or xinerama screen
 local root
 do
 	root = {
@@ -624,7 +726,6 @@ do
 				}
 				x11.flush_buffer()
 				x11.flush()
-				x11.xcb.xcb_set_input_focus(x11.conn, x11.xcb.XCB_INPUT_FOCUS_NONE, new.xwin, x11.xcb.XCB_TIME_CURRENT_TIME)
 			end
 		end
 	end
@@ -635,14 +736,87 @@ do
 		prev.removed_from(root)
 		prev.off()
 	end
+
+	-- Create input window
+	do
+		root.input_clw = {
+			type = 'hsplit.input_clw';
+		}
+		root.input_clw.xwin = x11.xcb.xcb_generate_id(x11.conn)
+		local values = ffi.new('int32_t[2]',
+			1,
+			bit.bor(unpack({ 0;
+				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
+			}))
+		)
+		x11.xcb.xcb_create_window(x11.conn,
+			0, -- depth: copy from parent
+			root.input_clw.xwin, -- window
+			root.xwin, -- parent
+			0, 0, -- x, y
+			1, 1, -- width, height
+			0, -- border width
+			x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
+			x11.screen.root_visual, -- visual
+			bit.bor( -- values mask
+				x11.xcb.XCB_CW_OVERRIDE_REDIRECT,
+				x11.xcb.XCB_CW_EVENT_MASK
+			),
+			values -- values
+		)
+		x11.map(root.input_clw.xwin)
+		ClW(root.input_clw)
+	end
+
+	function root.focus()
+		x11.focus(root.input_clw.xwin)
+	end
+
+	for _, name in ipairs({
+		'move';
+	}) do
+		root[name] = function()
+			error('root.' .. name .. ': this shouldn\'t ever be called')
+		end
+	end
+
+	Tile(root)
 end
 
-tiles.focused = root
+local ewmh
+do
+	ewmh = {
+		type = 'ewmh';
+	}
+
+	ewmh.xwin = x11.xcb.xcb_generate_id(x11.conn)
+	x11.xcb.xcb_create_window(x11.conn,
+		0, -- depth: copy from parent
+		ewmh.xwin, -- window
+		x11.screen.root, -- parent
+		0, 0, -- x, y
+		1, 1, -- width, height
+		0, -- border width
+		x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
+		x11.screen.root_visual, -- visual
+		0, -- values mask
+		nil -- values
+	)
+
+	ClW(ewmh)
+
+	x11.map(ewmh.xwin)
+end
 
 function tiles.focus(tile)
+	local prev = tiles.focused
 	tiles.focused = tile
+	if prev then
+		prev.defocus()
+	end
 	tile.focus()
 end
+tiles.focus(root)
 
 function tiles.add(tile)
 	p(tiles.focused.type)

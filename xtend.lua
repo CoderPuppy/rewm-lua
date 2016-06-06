@@ -1,3 +1,5 @@
+local pl = require 'pl.import_into' ()
+
 local xtend = {}
 
 setmetatable(xtend, { __call = function(_, ...)
@@ -29,6 +31,22 @@ function xtend.deep(...)
 		end
 	end
 
+	return res
+end
+
+function xtend.deep_map(t, f, path)
+	path = path or {}
+
+	if type(t) ~= 'table' then
+		return f(path, t)
+	end
+
+	local res = {}
+	for k, v in pairs(t) do
+		local path_ = pl.tablex.copy(path)
+		table.insert(path_, k)
+		res[k] = xtend.deep_map(v, f, path_)
+	end
 	return res
 end
 
