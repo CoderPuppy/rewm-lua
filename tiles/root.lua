@@ -26,7 +26,7 @@ function root.add(new, dir)
 			p('splitting root')
 
 			local prev = root.child
-			local split = tiles.hsplit()
+			local split = tiles.tabbed()
 			split.add(prev)
 			split.add(new)
 
@@ -45,6 +45,8 @@ function root.add(new, dir)
 				width = root.width;
 				height = root.height;
 			}
+			new.map()
+
 			x11.flush_buffer()
 			x11.flush()
 		end
@@ -53,15 +55,16 @@ end
 
 function root.remove(prev)
 	if root.child ~= prev then error('removing what\'s not there') end
-	root.child = nil
-	prev.removed_from(root)
+	prev.unmap()
 	prev.off()
+	prev.removed_from(root)
+	root.child = nil
 end
 
 -- Create input window
 do
 	root.input_clw = {
-		type = 'hsplit.input_clw';
+		type = 'root.input_clw';
 	}
 	root.input_clw.xwin = x11.xcb.xcb_generate_id(x11.conn)
 	local values = ffi.new('int32_t[2]',
@@ -87,10 +90,16 @@ do
 	)
 	x11.map(root.input_clw.xwin)
 	ClW(root.input_clw)
+
+	local cls = 'rewm:root.input'
+	x11.xcb.xcb_change_property(x11.conn, x11.xcb.XCB_PROP_MODE_REPLACE, root.input_clw.xwin, x11.A.WM_CLASS, x11.A.STRING, 8, #cls, cls)
 end
 
 function root.focus()
 	x11.focus(root.input_clw.xwin)
+end
+
+function root.unfocus()
 end
 
 for _, name in ipairs({
@@ -101,6 +110,12 @@ for _, name in ipairs({
 	end
 end
 
+function root.sibling_to_focus()
+end
+
 Tile(root)
+
+function root.activate()
+end
 
 tiles.focus(root)

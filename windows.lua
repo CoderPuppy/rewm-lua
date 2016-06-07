@@ -35,10 +35,11 @@ end })
 -- TODO: stacked
 
 function tiles.focus(tile)
+	tile.activate()
 	local prev = tiles.focused
 	tiles.focused = tile
 	if prev then
-		prev.defocus()
+		prev.unfocus()
 	end
 	tile.focus()
 end
@@ -54,8 +55,8 @@ function tiles.replace(prev, new)
 end
 
 function tiles.remove(tile)
-	if tiles.focused == tile then
-		tiles.focused = tile.parent or root
+	if tiles.focused.ancestry[tile] then
+		tiles.focus(tile.parent.sibling_to_focus(tile) or tile.parent)
 	end
 	for parent in pairs(tile.parents) do
 		parent.remove(tile)

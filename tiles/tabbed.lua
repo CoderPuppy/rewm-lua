@@ -3,12 +3,14 @@ local x11 = require '../x11'
 local ffi = require 'ffi'
 local Tile = require '../tile'
 local ClW = require '../clw'
+local render_title = require '../render-title'
+local colors = require '../colors'
 
 function tiles.tabbed()
 	local tile = {
 		type = 'tabbed';
 		parents = {};
-		children = {};
+		children = { n = 0 };
 
 		as_clw = {};
 	}
@@ -17,12 +19,6 @@ function tiles.tabbed()
 	do
 		tile.xwin = x11.xcb.xcb_generate_id(x11.conn)
 		tiles.cache[tile.xwin] = tile
-		local values = ffi.new('int32_t[2]',
-			1,
-			bit.bor(unpack({ 0;
-				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
-			}))
-		)
 		x11.xcb.xcb_create_window(x11.conn,
 			0, -- depth: copy from parent
 			tile.xwin, -- window
@@ -36,9 +32,19 @@ function tiles.tabbed()
 				x11.xcb.XCB_CW_OVERRIDE_REDIRECT,
 				x11.xcb.XCB_CW_EVENT_MASK
 			),
-			values -- values
+			ffi.new('int32_t[2]', -- values
+				1,
+				bit.bor(unpack({ 0;
+					x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
+					x11.xcb.XCB_EVENT_MASK_EXPOSURE;
+					x11.xcb.XCB_EVENT_MASK_BUTTON_PRESS;
+				}))
+			)
 		)
 	end
+
+	local cls = 'rewm:tabbed'
+	x11.xcb.xcb_change_property(x11.conn, x11.xcb.XCB_PROP_MODE_REPLACE, tile.xwin, x11.A.WM_CLASS, x11.A.STRING, 8, #cls, cls)
 
 	-- Create input window
 	do
@@ -46,12 +52,6 @@ function tiles.tabbed()
 			type = 'tabbed.input_clw';
 		}
 		tile.input_clw.xwin = x11.xcb.xcb_generate_id(x11.conn)
-		local values = ffi.new('int32_t[2]',
-			1,
-			bit.bor(unpack({ 0;
-				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
-			}))
-		)
 		x11.xcb.xcb_create_window(x11.conn,
 			0, -- depth: copy from parent
 			tile.input_clw.xwin, -- window
@@ -65,55 +65,165 @@ function tiles.tabbed()
 				x11.xcb.XCB_CW_OVERRIDE_REDIRECT,
 				x11.xcb.XCB_CW_EVENT_MASK
 			),
-			values -- values
+			ffi.new('int32_t[2]', -- values
+				1,
+				bit.bor(unpack({ 0;
+					x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
+				}))
+			)
 		)
 		x11.map(tile.input_clw.xwin)
 		ClW(tile.input_clw)
+
+		local cls = 'rewm:tabbed.input'
+		x11.xcb.xcb_change_property(x11.conn, x11.xcb.XCB_PROP_MODE_REPLACE, tile.input_clw.xwin, x11.A.WM_CLASS, x11.A.STRING, 8, #cls, cls)
 	end
 
 	function tile.focus()
-		x11.focus(tile.input_clw.xwin, x11.xcb.XCB_INPUT_FOCUS_NONE)
+		x11.focus(tile.input_clw.xwin)
+	end
+
+	local function activate(child)
+		if tile.parent then
+			tile.activate(child)
+		end
+		tile.active = child
+	end
+
+	local function title(child)
+		return function()
+			local i = tile.children[child]
+			local width = tile.width / tile.children.n
+			local x = (i - 1) * width
+			-- TODO: rounding
+			-- if width % 1 ~= 0 then
+			-- 	if i == 1 then
+			-- 		width = math.ceil(width)
+			-- 	else
+			-- 		x = x + width - width % 1
+			-- 		width = math.floor(width)
+			-- 	end
+			-- end
+			render_title {
+				xwin = tile.xwin;
+				x = x;
+				y = 0;
+				width = width;
+				height = 18;
+				title = child.title;
+				colors = tiles.focused == child and colors.focused or colors.unfocused;
+			}
+		end
+	end
+
+	function tile.as_clw.expose(ev)
+		if tile.mapped then
+			for _, child in ipairs(tile.children) do
+				title(child)()
+			end
+		end
+	end
+
+	function tile.as_clw.button_press(ev)
+		local width = tile.width / tile.children.n
+		if ev.event_y <= 18 then
+			tiles.focus(tile.children[math.floor(ev.event_x / width) + 1])
+		end
+	end
+
+	local function move_child(child)
+		x11.reparent(child.xwin, tile.xwin)
+		local title_pl = title(child)
+		child.move {
+			parent = tile;
+			x = 0;
+			y = 18;
+			width = tile.width;
+			height = tile.height - 18;
+			title_pl = title_pl;
+		}
+		title_pl()
 	end
 
 	function tile.add(new)
 		new.put_under(tile)
 
-		tile.children[#tile.children + 1] = new
+		tile.children[tile.children.n + 1] = new
+		tile.children[new] = tile.children.n + 1
+		tile.children.n = tile.children.n + 1
 
-		p('TODO', 'tabbed.add')
+		if tile.parent then
+			move_child(new)
+		end
+
+		if tile.mapped then
+			for _, child in ipairs(tile.children) do
+				title(child)()
+			end
+		end
+
+		activate(new)
 	end
 
 	function tile.remove(prev)
-		prev.removed_from(tile)
 		if tile.parent then
+			if tile.mapped and tile.active == prev then
+				prev.unmap()
+			end
 			prev.off()
+		end
+		prev.removed_from(tile)
+
+		local act = tile.sibling_to_focus(prev)
+		if act then
+			activate(act)
+		else
+			tile.active = nil
 		end
 
 		if #tile.children == 1 then
 			tiles.remove(tile)
 			x11.destroy_window(tile.xwin)
-			destroy_tile(tile)
+			tiles.cache[tile.xwin] = nil
 		else
-			local prev_i
-			for i, child in ipairs(tile.children) do
-				if child == prev then
-					prev_i = i
+			local i = tile.children[prev]
+			table.remove(tile.children, i)
+			tile.children[prev] = nil
+			tile.children.n = tile.children.n - 1
+
+			for j = i, tile.children.n do
+				tile.children[tile.children[j]] = j
+			end
+
+			if tile.mapped then
+				for _, child in ipairs(tile.children) do
+					title(child)()
 				end
 			end
-			if prev_i then
-				table.remove(tile.children, prev_i)
-			end
-			p('TODO', 'tabbed.remove')
 		end
 	end
 
 	function tile.move(move)
-		p('TODO', 'tabbed.move')
+		for _, child in ipairs(tile.children) do
+			move_child(child)
+		end
 	end
 
-	function tile.off()
-		x11.unmap(tile.xwin)
-		tile.parent = nil
+	function tile.activate(child)
+		if child then
+			if tile.active and tile.mapped then
+				tile.active.unmap()
+			end
+			tile.active = child
+			if tile.mapped then
+				child.map()
+			end
+		end
+	end
+
+	function tile.sibling_to_focus(child)
+		local i = tile.children[child]
+		return tile.children[i - 1] or tile.children[i + 1]
 	end
 
 	Tile(tile)

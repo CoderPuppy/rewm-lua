@@ -1,6 +1,8 @@
 local uv = require 'luv'
 local repl = require 'repl' :clone()
 
+local exit = require './exit'
+
 local history = ''
 
 local work = uv.new_work(
@@ -17,14 +19,7 @@ local work = uv.new_work(
 			repl:prompt(repl:handleline(line))
 		else
 			p('C-c')
-			for _, tile in pairs(tiles.cache) do
-				if tile.type == 'clw' then
-					x11.reparent(tile.clw.xwin, x11.screen.root)
-					x11.flush_buffer()
-					x11.xcb_util.xcb_aux_sync(x11.conn)
-				end
-			end
-			uv.stop()
+			exit()
 		end
 	end
 )

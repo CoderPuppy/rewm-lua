@@ -19,6 +19,9 @@ x11.xcb.xcb_create_window(x11.conn,
 	nil -- values
 )
 
+local cls = 'rewm:ewmh'
+x11.xcb.xcb_change_property(x11.conn, x11.xcb.XCB_PROP_MODE_REPLACE, ewmh.xwin, x11.A.WM_CLASS, x11.A.STRING, 8, #cls, cls)
+
 ClW(ewmh)
 
 x11.map(ewmh.xwin)

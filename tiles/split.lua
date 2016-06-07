@@ -20,6 +20,9 @@ local function split_resizer(con, con_size)
 				size = math.floor(size)
 			end
 			move(child, r.pos, size)
+			if con.mapped then
+				child.map()
+			end
 			r.pos = r.pos + size
 		end })
 	else
@@ -36,19 +39,15 @@ function tiles.hsplit()
 		children = {};
 		sizes = {};
 
-		as_clw = {};
+		as_clw = {
+			type = 'hsplit.as_clw';
+		};
 	}
 
-	-- Create window
+	-- create frame window
 	do
 		tile.xwin = x11.xcb.xcb_generate_id(x11.conn)
 		tiles.cache[tile.xwin] = tile
-		local values = ffi.new('int32_t[2]',
-			1,
-			bit.bor(unpack({ 0;
-				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
-			}))
-		)
 		x11.xcb.xcb_create_window(x11.conn,
 			0, -- depth: copy from parent
 			tile.xwin, -- window
@@ -58,13 +57,19 @@ function tiles.hsplit()
 			0, -- border width
 			x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
 			x11.screen.root_visual, -- visual
-			bit.bor( -- values mask
-				x11.xcb.XCB_CW_OVERRIDE_REDIRECT,
-				x11.xcb.XCB_CW_EVENT_MASK
-			),
-			values -- values
+			bit.bor(unpack({ 0;
+				x11.xcb.XCB_CW_OVERRIDE_REDIRECT;
+				x11.xcb.XCB_CW_EVENT_MASK;
+			})),
+			ffi.new('int32_t[2]',
+				1,
+				bit.bor(unpack({ 0;
+				}))
+			)
 		)
 	end
+	local cls = 'rewm:hsplit'
+	x11.xcb.xcb_change_property(x11.conn, x11.xcb.XCB_PROP_MODE_REPLACE, tile.xwin, x11.A.WM_CLASS, x11.A.STRING, 8, #cls, cls)
 
 	-- Create input window
 	do
@@ -72,12 +77,6 @@ function tiles.hsplit()
 			type = 'hsplit.input_clw';
 		}
 		tile.input_clw.xwin = x11.xcb.xcb_generate_id(x11.conn)
-		local values = ffi.new('int32_t[2]',
-			1,
-			bit.bor(unpack({ 0;
-				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
-			}))
-		)
 		x11.xcb.xcb_create_window(x11.conn,
 			0, -- depth: copy from parent
 			tile.input_clw.xwin, -- window
@@ -87,18 +86,26 @@ function tiles.hsplit()
 			0, -- border width
 			x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
 			x11.screen.root_visual, -- visual
-			bit.bor( -- values mask
+			bit.bor( -- value mask
 				x11.xcb.XCB_CW_OVERRIDE_REDIRECT,
 				x11.xcb.XCB_CW_EVENT_MASK
 			),
-			values -- values
+			ffi.new('int32_t[2]', -- values
+				1,
+				bit.bor(unpack({ 0;
+					x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
+				}))
+			)
 		)
 		x11.map(tile.input_clw.xwin)
 		ClW(tile.input_clw)
+
+		local cls = 'rewm:hsplit.input'
+		x11.xcb.xcb_change_property(x11.conn, x11.xcb.XCB_PROP_MODE_REPLACE, tile.input_clw.xwin, x11.A.WM_CLASS, x11.A.STRING, 8, #cls, cls)
 	end
 
 	function tile.focus()
-		x11.focus(tile.input_clw.xwin, x11.xcb.XCB_INPUT_FOCUS_NONE)
+		x11.focus(tile.input_clw.xwin)
 	end
 
 	local function split_move(child, x, width)
@@ -132,10 +139,13 @@ function tiles.hsplit()
 	end
 
 	function tile.remove(prev)
-		prev.removed_from(tile)
 		if tile.parent then
+			if tile.mapped then
+				prev.unmap()
+			end
 			prev.off()
 		end
+		prev.removed_from(tile)
 
 		if #tile.children == 1 then
 			tiles.remove(tile)
@@ -167,159 +177,18 @@ function tiles.hsplit()
 		end
 	end
 
-	function tile.off()
-		x11.unmap(tile.xwin)
-		tile.parent = nil
-	end
-
-	Tile(tile)
-
-	return tile
-end
-
-function tiles.vsplit()
-	local tile = {
-		type = 'vsplit';
-		parents = {};
-		children = {};
-		sizes = {};
-
-		as_clw = {};
-	}
-
-	-- Create window
-	do
-		tile.xwin = x11.xcb.xcb_generate_id(x11.conn)
-		tiles.cache[tile.xwin] = tile
-		local values = ffi.new('int32_t[2]',
-			1,
-			bit.bor(unpack({ 0;
-				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
-			}))
-		)
-		x11.xcb.xcb_create_window(x11.conn,
-			0, -- depth: copy from parent
-			tile.xwin, -- window
-			x11.screen.root, -- parent
-			0, 0, -- x, y
-			1, 1, -- width, height
-			0, -- border width
-			x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
-			x11.screen.root_visual, -- visual
-			bit.bor( -- values mask
-				x11.xcb.XCB_CW_OVERRIDE_REDIRECT,
-				x11.xcb.XCB_CW_EVENT_MASK
-			),
-			values -- values
-		)
-	end
-
-	-- Create input window
-	do
-		tile.input_clw = {
-			type = 'vsplit.input_clw';
-		}
-		tile.input_clw.xwin = x11.xcb.xcb_generate_id(x11.conn)
-		local values = ffi.new('int32_t[2]',
-			1,
-			bit.bor(unpack({ 0;
-				x11.xcb.XCB_EVENT_MASK_FOCUS_CHANGE;
-			}))
-		)
-		x11.xcb.xcb_create_window(x11.conn,
-			0, -- depth: copy from parent
-			tile.input_clw.xwin, -- window
-			tile.xwin, -- parent
-			0, 0, -- x, y
-			1, 1, -- width, height
-			0, -- border width
-			x11.xcb.XCB_WINDOW_CLASS_INPUT_OUTPUT, -- class
-			x11.screen.root_visual, -- visual
-			bit.bor( -- values mask
-				x11.xcb.XCB_CW_OVERRIDE_REDIRECT,
-				x11.xcb.XCB_CW_EVENT_MASK
-			),
-			values -- values
-		)
-		x11.map(tile.input_clw.xwin)
-		ClW(tile.input_clw)
-	end
-
-	function tile.focus()
-		x11.focus(tile.input_clw.xwin, x11.xcb.XCB_INPUT_FOCUS_NONE)
-	end
-
-	local function split_move(child, y, height)
-		if child.parent ~= tile then
-			x11.reparent(child.xwin, tile.xwin)
-		end
-		child.move {
-			parent = tile;
-			x = 0;
-			y = y;
-			width = tile.width;
-			height = height;
-		}
-	end
-
-	function tile.add(new)
-		new.put_under(tile)
-
-		local num = #tile.children
-		local factor = num / (num + 1)
-		
-		local r = split_resizer(tile, tile.height)
+	function tile.map()
 		for _, child in ipairs(tile.children) do
-			tile.sizes[child] = tile.sizes[child] * factor
-			r(child, split_move)
-		end
-
-		tile.children[#tile.children + 1] = new
-		tile.sizes[new] = 1 / (num + 1)
-		r(new, split_move)
-	end
-
-	function tile.remove(prev)
-		prev.removed_from(tile)
-		if tile.parent then
-			prev.off()
-		end
-
-		if #tile.children == 1 then
-			tiles.remove(tile)
-			x11.destroy_window(tile.xwin)
-			tiles.cache[tile.xwin] = nil
-		else
-			local amt = tile.sizes[prev] / (#tile.children - 1)
-			local r = split_resizer(tile, tile.height)
-			local prev_i
-			for i, child in ipairs(tile.children) do
-				if child == prev then
-					prev_i = i
-				else
-					tile.sizes[child] = tile.sizes[child] + amt
-					r(child, split_move)
-				end
-			end
-			if prev_i then
-				table.remove(tile.children, prev_i)
-			end
-			tile.sizes[prev] = nil
+			child.map()
 		end
 	end
 
-	function tile.move(move)
-		local r = split_resizer(tile, tile.height)
+	function tile.unmap()
 		for _, child in ipairs(tile.children) do
-			r(child, split_move)
+			child.unmap()
 		end
 	end
-
-	function tile.off()
-		x11.unmap(tile.xwin)
-		tile.parent = nil
-	end
-
+	
 	Tile(tile)
 
 	return tile
