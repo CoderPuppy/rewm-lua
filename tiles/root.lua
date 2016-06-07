@@ -26,12 +26,13 @@ function root.add(new, dir)
 			p('splitting root')
 
 			local prev = root.child
-			local split = tiles.tabbed()
-			split.add(prev)
-			split.add(new)
+			-- TODO: make the configurable
+			local con = tiles.tabbed()
+			con.add(prev)
+			con.add(new)
 
 			root.remove(prev)
-			root.add(split)
+			root.add(con)
 		else
 			root.child = new
 
