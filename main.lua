@@ -1,3 +1,5 @@
+local require = require 'nsrq' ()
+
 local ffi = require 'ffi'
 local pl = require 'pl.import_into' ()
 local uv = require 'luv'
@@ -7,8 +9,14 @@ function _G.p(...)
 	io.stderr:write(table.concat(pl.seq({...}):map(tostring):copy(), '\t') .. '\n')
 end
 
-local x11 = require 'x11'
-local clws, tiles = table.unpack(require 'windows')
+local x11 = require './x11'
+local clws, tiles = table.unpack(require './windows')
+require './tiles/root'
+require './tiles/split'
+require './clws/ewmh'
+require './clws/auto'
+require './clws/tile'
+require './clws/dummy'
 
 local A = x11.A
 

@@ -2,10 +2,12 @@ local ffi = require 'ffi'
 local pl = require 'pl.import_into' ()
 local uv = require 'luv'
 
-local xtend = require 'xtend'
+local xtend = require './xtend'
 
 local x11 = {}
 x11.tick_tasks = {}
+
+-- print('loading x11', i(require))
 
 -- Load xcb
 local xcb, xcb_randr, xcb_xinerama, xcb_util, xcb_shape
