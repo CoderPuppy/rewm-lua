@@ -45,6 +45,7 @@ function clws.tile(xclw)
 				bit.bor(unpack({ 0;
 					x11.xcb.XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
 					x11.xcb.XCB_EVENT_MASK_EXPOSURE;
+					x11.xcb.XCB_EVENT_MASK_BUTTON_PRESS;
 				}))
 			)
 		)
@@ -78,6 +79,10 @@ function clws.tile(xclw)
 		tiles.focus(tile)
 		x11.xcb.xcb_allow_events(x11.conn, x11.xcb.XCB_ALLOW_REPLAY_POINTER, ev.time)
 		x11.xcb.xcb_allow_events(x11.conn, x11.xcb.XCB_ALLOW_ASYNC_KEYBOARD, ev.time)
+	end
+
+	function tile.as_clw.button_press(ev)
+		tiles.focus(tile)
 	end
 
 	local function render()

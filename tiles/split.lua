@@ -42,6 +42,8 @@ function tiles.hsplit()
 		as_clw = {
 			type = 'hsplit.as_clw';
 		};
+
+		title = 'hsplit';
 	}
 
 	-- create frame window
@@ -106,12 +108,19 @@ function tiles.hsplit()
 
 	function tile.focus()
 		x11.focus(tile.input_clw.xwin)
+		if tile.title_pl then
+			tile.title_pl()
+		end
+	end
+
+	function tile.unfocus()
+		if tile.title_pl then
+			tile.title_pl()
+		end
 	end
 
 	local function split_move(child, x, width)
-		if child.parent ~= tile then
-			x11.reparent(child.xwin, tile.xwin)
-		end
+		x11.reparent(child.xwin, tile.xwin)
 		child.move {
 			parent = tile;
 			x = x;
@@ -170,6 +179,32 @@ function tiles.hsplit()
 		end
 	end
 
+	function tile.replace(prev, new)
+		if tile.parent then
+			prev.unmap()
+			prev.off()
+		end
+		prev.removed_from(tile)
+
+		tile.sizes[new] = tile.sizes[prev]
+		tile.sizes[prev] = nil
+
+		new.put_under(tile)
+
+		local r = split_resizer(tile, tile.width)
+		local prev_i
+		for i, child in ipairs(tile.children) do
+			if child == prev then
+				prev_i = i
+				r(new, split_move)
+				break
+			else
+				r(child, split_move)
+			end
+		end
+		tile.children[prev_i] = new
+	end
+
 	function tile.move(move)
 		local r = split_resizer(tile, tile.width)
 		for _, child in ipairs(tile.children) do
@@ -187,6 +222,11 @@ function tiles.hsplit()
 		for _, child in ipairs(tile.children) do
 			child.unmap()
 		end
+	end
+
+	function tile.sibling_to_focus(child)
+		local i = tile.children[child]
+		return tile.children[i - 1] or tile.children[i + 1]
 	end
 	
 	Tile(tile)

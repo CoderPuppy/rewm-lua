@@ -47,6 +47,7 @@ ctx.ffi = require 'ffi'
 ctx.xtend = require 'xtend'
 ctx.x11 = require 'x11'
 ctx.clws, ctx.tiles = unpack(require 'windows')
+ctx.require = require
 
 repl:loadplugin 'autoreturn'
 repl:loadplugin 'keep_last_eval'

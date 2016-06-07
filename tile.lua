@@ -84,6 +84,10 @@ local Tile; Tile = {
 				if not tile.parent then
 					return
 				end
+
+				if tile.mapped then
+					tile.unmap()
+				end
 				
 				tile.parent = nil
 				tile.ancestry = nil
@@ -99,6 +103,10 @@ local Tile; Tile = {
 
 		map = function(tile, f)
 			return function(...)
+				if not tile.parent then
+					error('no parent when mapping')
+				end
+
 				if tile.mapped then
 					return
 				end
@@ -110,6 +118,10 @@ local Tile; Tile = {
 
 		unmap = function(tile, f)
 			return function(...)
+				if not tile.parent then
+					error('no parent when unmapping')
+				end
+
 				if not tile.mapped then
 					return
 				end

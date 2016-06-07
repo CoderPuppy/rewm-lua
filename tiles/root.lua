@@ -119,3 +119,5 @@ function root.activate()
 end
 
 tiles.focus(root)
+
+return root

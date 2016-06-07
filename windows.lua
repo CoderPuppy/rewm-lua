@@ -50,8 +50,19 @@ function tiles.add(tile)
 	tiles.focus(tile)
 end
 
+-- TODO: global replace (maybe?)
 function tiles.replace(prev, new)
-	p('TODO', 'tiles.replace')
+	-- for parent in pairs(prev.parents) do
+	-- 	print(parent.type)
+	-- 	parent.replace(prev, new)
+	-- end
+	local focused = tiles.focused.ancestry[prev]
+	if prev.parent then
+		prev.parent.replace(prev, new)
+	end
+	if focused then
+		tiles.focus(new)
+	end
 end
 
 function tiles.remove(tile)
