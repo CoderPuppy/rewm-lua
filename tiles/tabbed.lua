@@ -108,15 +108,21 @@ function tiles.tabbed()
 				width = width;
 				height = 18;
 				title = child.title;
-				colors = (tiles.focused == child or tiles.focused == tile) and colors.focused or colors.unfocused;
+				colors = child.focused and colors.focused or colors.unfocused;
 			}
 		end
 	end
 
 	function tile.focus()
-		x11.focus(tile.input_clw.xwin)
 		for _, child in ipairs(tile.children) do
-			title(child)()
+			child.focus()
+		end
+		x11.focus(tile.input_clw.xwin)
+	end
+
+	function tile.unfocus()
+		for _, child in ipairs(tile.children) do
+			child.unfocus()
 		end
 	end
 

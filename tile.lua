@@ -74,6 +74,10 @@ local Tile; Tile = {
 				tile.title_pl = move.title_pl
 
 				x11.move(tile.xwin, tile.x, tile.y, tile.width, tile.height)
+
+				if tile.title_pl then
+					tile.title_pl()
+				end
 				
 				return f(...)
 			end
@@ -144,6 +148,26 @@ local Tile; Tile = {
 					return
 				end
 
+				return f(...)
+			end
+		end;
+
+		focus = function(tile, f)
+			return function(...)
+				tile.focused = true
+				if tile.title_pl then
+					tile.title_pl()
+				end
+				return f(...)
+			end
+		end;
+
+		unfocus = function(tile, f)
+			return function(...)
+				tile.focused = false
+				if tile.title_pl then
+					tile.title_pl()
+				end
 				return f(...)
 			end
 		end;

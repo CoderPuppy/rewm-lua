@@ -107,15 +107,15 @@ function tiles.hsplit()
 	end
 
 	function tile.focus()
-		x11.focus(tile.input_clw.xwin)
-		if tile.title_pl then
-			tile.title_pl()
+		for _, child in ipairs(tile.children) do
+			child.focus()
 		end
+		x11.focus(tile.input_clw.xwin)
 	end
 
 	function tile.unfocus()
-		if tile.title_pl then
-			tile.title_pl()
+		for _, child in ipairs(tile.children) do
+			child.unfocus()
 		end
 	end
 

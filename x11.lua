@@ -713,6 +713,16 @@ do
 		end
 	end
 
+	local waits = {}
+	function x11.wait(name, wait_for)
+		local wait = waits[name]
+		if not wait then
+			wait = {}
+			waits[name] = wait
+		end
+		wait[wait_for] = {}
+	end
+
 	function x11.flush_buffer(ord)
 		p('flush', ord and table.concat(ord, ', ') or '*')
 		if not ord then
@@ -739,6 +749,15 @@ do
 							stop = true
 						end
 					end
+					local wait = waits[win]
+					if wait then
+						for dep in pairs(wait) do
+							if rawget(out_buffer, dep) then
+								ord[#ord + 1] = dep
+								stop = true
+							end
+						end
+					end
 					if stop then
 						ord[#ord + 1] = win
 						break
@@ -748,6 +767,7 @@ do
 				out.fn()
 
 				out_buffer[win] = nil
+				waits[win] = nil
 			until true
 		end
 		x11.flush()

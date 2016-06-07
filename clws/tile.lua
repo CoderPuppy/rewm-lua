@@ -90,7 +90,7 @@ function clws.tile(xclw)
 			return
 		end
 
-		local colors_ = tiles.focused == tile and colors.focused or colors.unfocused
+		local colors_ = tile.focused and colors.focused or colors.unfocused
 		local rects = ffi.new('xcb_rectangle_t[1]')
 
 		if tile.mapped and true then
@@ -178,7 +178,8 @@ function clws.tile(xclw)
 	end
 
 	function tile.focus()
-		x11.focus(tile.xwin)
+		x11.wait('focus', 'win:' .. tile.xwin)
+		x11.focus(clw.xwin)
 		render()
 	end
 
