@@ -31,8 +31,7 @@ function root.add(new, dir)
 			con.add(prev)
 			con.add(new)
 
-			root.remove(prev)
-			root.add(con)
+			root.replace(prev, con)
 		else
 			root.child = new
 
@@ -60,6 +59,29 @@ function root.remove(prev)
 	prev.off()
 	prev.removed_from(root)
 	root.child = nil
+end
+
+function root.replace(prev, new)
+	if root.child ~= prev then
+		error('replacing what\'s not there')
+	end
+
+	prev.unmap()
+	prev.off()
+	prev.removed_from(root)
+
+	root.child = new
+
+	x11.reparent(new.xwin, root.xwin)
+	new.put_under(root)
+	new.move {
+		parent = root;
+		x = 0;
+		y = 0;
+		width = root.width;
+		height = root.height;
+	}
+	new.map()
 end
 
 -- Create input window
