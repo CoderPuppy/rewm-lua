@@ -37,6 +37,7 @@ do
 	conn = xcb.xcb_connect(nil, scrid)
 	setup = xcb.xcb_get_setup(conn)
 	screen = xcb_util.xcb_aux_get_screen(conn, scrid[0])
+	print(conn, scrid[0], screen)
 end
 -- TODO
 x11.conn = conn

@@ -142,6 +142,7 @@ local function split_type(typ, resizer)
 			prev.removed_from(tile)
 
 			if #tile.children == 1 then
+				tile.children[1] = nil
 				tiles.remove(tile)
 				x11.destroy_window(tile.xwin)
 				tiles.cache[tile.xwin] = nil
@@ -210,8 +211,8 @@ local function split_type(typ, resizer)
 		end
 
 		function tile.sibling_to_focus(child)
-			local i = tile.children[child]
-			return tile.children[i - 1] or tile.children[i + 1]
+			-- local i = tile.children[child]
+			-- return tile.children[i - 1] or tile.children[i + 1]
 		end
 		
 		Tile(tile)
