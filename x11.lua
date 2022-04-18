@@ -123,18 +123,6 @@ do
 	end
 	x11.A[0] = nil
 	
-	do
-		local tmp = {}
-		for _, atom in ipairs({
-			'_NET_WM_NAME';
-		}) do
-			tmp[atom] = xcb.xcb_intern_atom(conn, 0, #atom, atom)
-		end
-		for name, req in pairs(tmp) do
-			x11.A[name] = xcb.xcb_intern_atom_reply(conn, req, nil).atom
-		end
-	end
-
 	setmetatable(x11.A, { __index = function(_, arg)
 		if type(arg) == 'string' then
 			local name = arg
@@ -167,6 +155,12 @@ do
 			error('bad atom type: ' .. type(atom))
 		end
 	end })
+
+	for _, name in ipairs {
+			'_NET_WM_NAME';
+	} do
+		local _ = x11.A[name]
+	end
 end
 
 function x11.randr_outputs()
@@ -546,11 +540,9 @@ do
 						if opts.map == false then
 							xcb.xcb_unmap_window(conn, win)
 						end
-						do
+						if opts.reparent then
 							local repar = opts.reparent
-							if repar then
-								xcb.xcb_reparent_window(conn, win, repar.parent, repar.x, repar.y)
-							end
+							xcb.xcb_reparent_window(conn, win, repar.parent, repar.x, repar.y)
 						end
 						if opts.map == true then
 							xcb.xcb_map_window(conn, win)
